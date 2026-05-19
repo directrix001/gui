@@ -1,0 +1,18 @@
+Traceback (most recent call last):
+  File "C:\Users\800113527\Desktop\SQL Commentry\app2.py", line 753, in <module>
+    app = NissanVarianceApp()
+          ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\800113527\Desktop\SQL Commentry\app2.py", line 107, in __init__
+    self._build_ui()
+  File "C:\Users\800113527\Desktop\SQL Commentry\app2.py", line 201, in _build_ui
+    self._build_input_section(left)
+  File "C:\Users\800113527\Desktop\SQL Commentry\app2.py", line 271, in _build_input_section
+    card = self._section(parent, "01  Input Folders")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\800113527\Desktop\SQL Commentry\app2.py", line 258, in _section
+    tk.Label(label_row, text=f"  {title.upper()}",
+  File "C:\Program Files\Python312\Lib\tkinter\__init__.py", line 3248, in __init__
+    Widget.__init__(self, master, 'label', cnf, kw)
+  File "C:\Program Files\Python312\Lib\tkinter\__init__.py", line 2659, in __init__
+    self.tk.call(
+_tkinter.TclError: unknown option "-letterSpacing"
