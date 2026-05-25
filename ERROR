@@ -1,7 +1,53 @@
 def find_fmi_row_nv(df: pd.DataFrame):
     starts = _brand_starts(df, "nissan nv", "datsun nv", "infiniti nv", "total nv")
+    
+    # AFTER: replace raise with warning + zero tuple
+    if any(s is None for s in starts):
+        missing = [
+            label for label, s in zip(
+                ["nissan nv", "datsun nv", "infiniti nv", "total nv"], starts
+            ) if s is None
+        ]
+        logger.warning(
+            f"find_fmi_row_nv: labels not found → {missing}. Returning zeros."
+        )
+        return (0,) * 16  # 4 brands × 4 values each
+
     rows = [_find_fmi_indices(df, s) for s in starts]
     if any(r is None for r in rows):
-        raise ValueError("FMI indices incomplete for NV section.")
+        logger.warning("find_fmi_row_nv: FMI indices incomplete. Returning zeros.")
+        return (0,) * 16
+
     return tuple(v for r in rows for v in r)
- 
+def find_fmi_row_uc(df: pd.DataFrame):
+    starts = _brand_starts(df, "uc nissan", "uc datsun", "uc total")
+    if any(s is None for s in starts):
+        logger.warning("find_fmi_row_uc: labels not found. Returning zeros.")
+        return (0,) * 12
+    rows = [_find_fmi_indices(df, s) for s in starts]
+    if any(r is None for r in rows):
+        return (0,) * 12
+    return tuple(v for r in rows for v in r)
+
+
+def find_fmi_row_as(df: pd.DataFrame):
+    starts = _brand_starts(df, "as nissan", "as datsun", "as infiniti", "as total")
+    if any(s is None for s in starts):
+        logger.warning("find_fmi_row_as: labels not found. Returning zeros.")
+        return (0,) * 16
+    rows = [_find_fmi_indices(df, s) for s in starts]
+    if any(r is None for r in rows):
+        return (0,) * 16
+    return tuple(v for r in rows for v in r)
+
+
+def find_fmi_row_export(df: pd.DataFrame):
+    starts = _brand_starts(df, "nissan export", "datsun export", 
+                           "infiniti export", "total export")
+    if any(s is None for s in starts):
+        logger.warning("find_fmi_row_export: labels not found. Returning zeros.")
+        return (0,) * 16
+    rows = [_find_fmi_indices(df, s) for s in starts]
+    if any(r is None for r in rows):
+        return (0,) * 16
+    return tuple(v for r in rows for v in r)
