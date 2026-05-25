@@ -1,121 +1,100 @@
+Looking at the warnings, the issue is clear:
 
-2026-05-25 12:53:55,761 - INFO - UI triggered
-2026-05-25 13:02:00,613 - INFO - ACT triggered
-2026-05-25 13:02:00,613 - INFO - Submit_2 triggered
-2026-05-25 13:02:00,613 - INFO - UI triggered
-2026-05-25 13:03:59,826 - INFO - calculate_alternate_value_1 started
-2026-05-25 13:03:59,827 - INFO - Output folder created: C:/Users/NE72649/Desktop/Output_folder\Apr_20260525_130359
-2026-05-25 13:03:59,827 - WARNING - [SKIP] DataFrame 'df_r_and_d' absent/empty � cells \u2192 =0
-2026-05-25 13:03:59,828 - WARNING - [SKIP] DataFrame 'df_P_L_MCCP' absent/empty � cells \u2192 =0
-2026-05-25 13:03:59,829 - WARNING - [SKIP] DataFrame 'df_high_variance_feuil' absent/empty � cells \u2192 =0
-2026-05-25 13:03:59,829 - WARNING - [SKIP] DataFrame 'df_Relief_KD' absent/empty � cells \u2192 =0
-2026-05-25 13:03:59,830 - WARNING - [SKIP] DataFrame 'df_itp' absent/empty � cells \u2192 =0
-2026-05-25 13:03:59,831 - WARNING - [SKIP] File 'Relief KD file' not found ('') � formulas \u2192 =0
-2026-05-25 13:03:59,832 - INFO - Step 1: resolving column indices
-2026-05-25 13:03:59,840 - INFO - Step 2: resolving row indices
-2026-05-25 13:04:02,176 - WARNING - find_fmi_row_nv(df_P_L_ROP_NE): Required label 'nissan nv' not found in first 3 columns.
-2026-05-25 13:04:02,177 - WARNING - find_fmi_row_uc(df_P_L_ROP_NE): Required label 'uc nissan' not found in first 3 columns.
-2026-05-25 13:04:02,179 - WARNING - find_fmi_row_as(df_P_L_ROP_NE): Required label 'as nissan' not found in first 3 columns.
-2026-05-25 13:04:02,181 - WARNING - find_fmi_row_export(df_P_L_ROP_NE): Required label 'nissan export' not found in first 3 columns.
-2026-05-25 13:04:02,884 - WARNING - find_financial_indices(df_P_L_ROP_NE): 'g&a' not found in first 3 columns.
-2026-05-25 13:04:02,886 - WARNING - find_oem_terms(df_P_L_ROP_NE): 'oem' not found in first 3 columns.
-2026-05-25 13:04:02,888 - WARNING - find_ocs_terms(df_P_L_ROP_NE): 'ocs' not found in first 3 columns.
-2026-05-25 13:04:03,035 - WARNING - find_transfer_price_adjustment(df_hQ_items): 'DataFrame' object has no attribute 'applymap'
-2026-05-25 13:04:03,036 - WARNING - tax_and_public(df_P_L_HQ): 'DataFrame' object has no attribute 'applymap'
-2026-05-25 13:04:03,037 - WARNING - operating_profit(df_P_L_HQ): 'DataFrame' object has no attribute 'applymap'
-2026-05-25 13:04:03,439 - WARNING - _int(): could not convert 'Not found' to int � using 0
-2026-05-25 13:04:03,440 - WARNING - _int(): could not convert 'Not found' to int � using 0
-2026-05-25 13:04:03,441 - WARNING - _int(): could not convert 'Not found' to int � using 0
-2026-05-25 13:04:03,441 - WARNING - _int(): could not convert 'Not found' to int � using 0
-2026-05-25 13:04:03,442 - WARNING - _int(): could not convert 'Not found' to int � using 0
-2026-05-25 13:04:03,442 - WARNING - _int(): could not convert 'Not found' to int � using 0
-2026-05-25 13:04:03,443 - WARNING - _int(): could not convert 'Not found' to int � using 0
-2026-05-25 13:04:03,443 - WARNING - _int(): could not convert 'Not found' to int � using 0
-2026-05-25 13:04:03,444 - WARNING - _int(): could not convert 'Not found' to int � using 0
-2026-05-25 13:04:03,444 - WARNING - _int(): could not convert 'Not found' to int � using 0
-2026-05-25 13:04:03,445 - WARNING - _int(): could not convert 'Not found' to int � using 0
-2026-05-25 13:04:03,453 - WARNING - energy_tgk_68(df_hQ_items): 'DataFrame' object has no attribute 'applymap'
-2026-05-25 13:04:03,453 - INFO - Step 3: building formula strings
-2026-05-25 13:08:16,305 - INFO - Step 4: building cell update tables
-2026-05-25 13:08:16,306 - INFO - Step 5: writing output file
-2026-05-25 13:09:54,813 - INFO - P&L output written \u2192 C:/Users/NE72649/Desktop/Output_folder\Apr_20260525_130359\FY25 P&L Summary April_output_FY2026-27.xlsx  (355.0s)
-2026-05-25 13:09:54,814 - INFO - Step 6: calling ACT
-2026-05-25 13:09:54,815 - INFO - ACT started
-2026-05-25 13:09:54,816 - INFO - ACT Step 1: resolving column indices
-2026-05-25 13:09:56,262 - INFO - ACT Step 2: OSP lookups
-2026-05-25 13:09:56,267 - INFO - ACT Step 3: HFM Managerial re-read
-2026-05-25 13:09:56,268 - WARNING - find_values_pandas_HFM: 'DataFrame' object has no attribute 'applymap'
-2026-05-25 13:10:04,947 - INFO - HMF Managerial re-read OK
-2026-05-25 13:10:04,948 - INFO - ACT Step 4: building HFM formula block
-2026-05-25 13:10:07,780 - INFO - ACT Step 5: goodwill row extraction
-2026-05-25 13:10:07,781 - WARNING - [SKIP] File 'Goodwill generated output' not found ('C:/Users/NE72649/Desktop/Output_folder\\Apr_20260525_130359\\Goodwill_April_output_FY2026-27.xlsx') � formulas \u2192 =0
-2026-05-25 13:10:07,796 - INFO - Goodwill f1=='[C:/Users/NE72649/Desktop/Test Folder/Goodwill CALCULATION FILE.xlsx]GW Budget'!C2
-2026-05-25 13:10:07,796 - INFO - ACT Step 6: relief row extraction
-2026-05-25 13:10:08,327 - INFO - ACT Step 7: CFMI row extraction
-2026-05-25 13:10:08,329 - INFO - ACT Step 8: building formulas
-2026-05-25 13:10:18,290 - INFO - ACT Step 9: writing KPI output file
-2026-05-25 13:10:22,043 - INFO - ACT KPI output written \u2192 C:/Users/NE72649/Desktop/Output_folder\Apr_20260525_130359\NEW_KPI_P&L_April_output_FY2026-27.xlsx
-2026-05-25 13:10:22,044 - INFO - ACT Step 10: writing Goodwill output file
-2026-05-25 13:10:22,371 - INFO - ACT Goodwill output written
-2026-05-25 13:10:22,372 - INFO - ACT completed
-2026-05-25 13:22:25,443 - INFO - ACT triggered
-2026-05-25 13:22:25,443 - INFO - Submit_2 triggered
-2026-05-25 13:22:25,444 - INFO - UI triggered
-2026-05-25 13:22:40,917 - INFO - ACT triggered
-2026-05-25 13:22:40,917 - INFO - Submit_2 triggered
-2026-05-25 13:22:40,917 - INFO - UI triggered
-2026-05-25 13:25:01,461 - INFO - calculate_alternate_value_1 started
-2026-05-25 13:25:01,462 - WARNING - [SKIP] DataFrame 'df_r_and_d' is empty � cells \u2192 =0
-2026-05-25 13:25:01,463 - WARNING - [SKIP] DataFrame 'df_P_L_MCCP' is empty � cells \u2192 =0
-2026-05-25 13:25:01,464 - WARNING - [SKIP] DataFrame 'df_high_variance_feuil' is empty � cells \u2192 =0
-2026-05-25 13:25:01,464 - WARNING - [SKIP] DataFrame 'df_Relief_KD' is empty � cells \u2192 =0
-2026-05-25 13:25:01,465 - WARNING - [SKIP] DataFrame 'df_itp' is empty � cells \u2192 =0
-2026-05-25 13:25:01,466 - WARNING - [SKIP] File 'Relief KD file' path is empty � formulas \u2192 =0
-2026-05-25 13:25:01,467 - INFO - Step 1: resolving column indices
-2026-05-25 13:25:01,476 - INFO - Step 2: resolving row indices
-2026-05-25 13:25:04,012 - WARNING - find_fmi_row_nv(df_P_L_ROP_NE): Required label 'nissan nv' not found in first 3 columns.
-2026-05-25 13:25:04,014 - WARNING - find_fmi_row_uc(df_P_L_ROP_NE): Required label 'uc nissan' not found in first 3 columns.
-2026-05-25 13:25:04,016 - WARNING - find_fmi_row_as(df_P_L_ROP_NE): Required label 'as nissan' not found in first 3 columns.
-2026-05-25 13:25:04,019 - WARNING - find_fmi_row_export(df_P_L_ROP_NE): Required label 'nissan export' not found in first 3 columns.
-2026-05-25 13:25:04,964 - WARNING - find_financial_indices(df_P_L_ROP_NE): 'g&a' not found in first 3 columns.
-2026-05-25 13:25:04,965 - WARNING - find_oem_terms(df_P_L_ROP_NE): 'oem' not found in first 3 columns.
-2026-05-25 13:25:04,967 - WARNING - find_ocs_terms(df_P_L_ROP_NE): 'ocs' not found in first 3 columns.
-2026-05-25 13:25:05,199 - WARNING - find_transfer_price_adjustment(df_hQ_items): 'DataFrame' object has no attribute 'applymap'
-2026-05-25 13:25:05,200 - WARNING - tax_and_public(df_P_L_HQ): 'DataFrame' object has no attribute 'applymap'
-2026-05-25 13:25:05,201 - WARNING - operating_profit(df_P_L_HQ): 'DataFrame' object has no attribute 'applymap'
-2026-05-25 13:25:05,689 - WARNING - _int(): could not convert 'Not found' to int � using 0
-2026-05-25 13:25:05,691 - WARNING - _int(): could not convert 'Not found' to int � using 0
-2026-05-25 13:25:05,692 - WARNING - _int(): could not convert 'Not found' to int � using 0
-2026-05-25 13:25:05,693 - WARNING - _int(): could not convert 'Not found' to int � using 0
-2026-05-25 13:25:05,694 - WARNING - _int(): could not convert 'Not found' to int � using 0
-2026-05-25 13:25:05,695 - WARNING - _int(): could not convert 'Not found' to int � using 0
-2026-05-25 13:25:05,696 - WARNING - _int(): could not convert 'Not found' to int � using 0
-2026-05-25 13:25:05,697 - WARNING - _int(): could not convert 'Not found' to int � using 0
-2026-05-25 13:25:05,697 - WARNING - _int(): could not convert 'Not found' to int � using 0
-2026-05-25 13:25:05,698 - WARNING - _int(): could not convert 'Not found' to int � using 0
-2026-05-25 13:25:05,698 - WARNING - _int(): could not convert 'Not found' to int � using 0
-2026-05-25 13:25:05,709 - WARNING - energy_tgk_68(df_hQ_items): 'DataFrame' object has no attribute 'applymap'
-2026-05-25 13:25:05,710 - INFO - Step 3: building formula strings
-2026-05-25 13:29:08,914 - INFO - Step 4: building cell update tables
-2026-05-25 13:29:08,916 - INFO - Step 5: writing output file
-2026-05-25 13:30:33,612 - INFO - P&L output written \u2192 C:/Users/NE72649/Desktop/Output_folder\FY25 P&L Summary April_output_FY2026-27.xlsx  (332.2s)
-2026-05-25 13:30:33,616 - INFO - Z-Audit report written \u2192 C:/Users/NE72649/Desktop/Output_folder\zero_population_audit_20260525_132501.txt  (147 zero events)
-2026-05-25 13:30:33,616 - INFO - Z-Audit report \u2192 C:/Users/NE72649/Desktop/Output_folder\zero_population_audit_20260525_132501.txt
-2026-05-25 13:30:33,617 - INFO - Step 6: calling ACT
-2026-05-25 13:30:33,618 - INFO - ACT started
-2026-05-25 13:30:33,619 - INFO - ACT Step 1: resolving column indices
-2026-05-25 13:30:35,169 - INFO - ACT Step 2: OSP lookups
-2026-05-25 13:30:35,174 - INFO - ACT Step 3: HFM Managerial re-read
-2026-05-25 13:30:35,175 - WARNING - find_values_pandas_HFM: 'DataFrame' object has no attribute 'applymap'
-2026-05-25 13:30:44,538 - INFO - HMF Managerial re-read OK
-2026-05-25 13:30:44,539 - INFO - ACT Step 4: building HFM formula block
-2026-05-25 13:30:47,099 - INFO - ACT Step 5: goodwill row extraction
-2026-05-25 13:30:47,115 - INFO - Goodwill f1=='[C:/Users/NE72649/Desktop/Test Folder/Goodwill CALCULATION FILE.xlsx]GW Budget'!C2
-2026-05-25 13:30:47,116 - INFO - ACT Step 6: relief row extraction
-2026-05-25 13:30:47,677 - INFO - ACT Step 7: CFMI row extraction
-2026-05-25 13:30:47,679 - INFO - ACT Step 8: building formulas
-2026-05-25 13:30:58,001 - INFO - ACT Step 9: writing KPI output file
-2026-05-25 13:31:01,742 - INFO - ACT KPI output written \u2192 C:/Users/NE72649/Desktop/Output_folder\NEW_KPI_P&L_April_output_FY2026-27.xlsx
-2026-05-25 13:31:01,743 - INFO - ACT Step 10: writing Goodwill output file
-2026-05-25 13:31:02,050 - INFO - ACT Goodwill output written
-2026-05-25 13:31:02,051 - INFO - ACT completed
+```
+find_fmi_row_nv(df_P_L_ROP_NE): Required label 'nissan nv' not found in first 3 columns.
+find_financial_indices(df_P_L_ROP_NE): 'g&a' not found in first 3 columns.
+```
+
+The problem is **leading apostrophes/special characters in cell values** AND **case mismatch** in the search functions. Here's exactly where to fix each one:
+
+---
+
+## Fix Location: `Submit_2_Helper_function.py`
+
+All these search functions scan the first 3 columns of `df_P_L_ROP_NE`. You need to **strip and lowercase both sides** of every comparison.
+
+### Pattern to apply everywhere:
+
+```python
+# BEFORE (typical existing code):
+if 'nissan nv' in str(cell).lower():
+
+# AFTER:
+if 'nissan nv' in str(cell).strip().lstrip("'\"").lower():
+```
+
+---
+
+### Functions to fix and what to change:
+
+**1. `find_fmi_row_nv`**
+```python
+# Find lines like:
+if 'nissan nv' in str(row[col]).lower():
+# Fix:
+if 'nissan nv' in str(row[col]).strip().lstrip("'\"").lower():
+```
+
+**2. `find_fmi_row_uc`**
+```python
+if 'uc nissan' in str(row[col]).lower():
+# Fix:
+if 'uc nissan' in str(row[col]).strip().lstrip("'\"").lower():
+```
+
+**3. `find_fmi_row_as`**
+```python
+if 'as nissan' in str(row[col]).lower():
+# Fix:
+if 'as nissan' in str(row[col]).strip().lstrip("'\"").lower():
+```
+
+**4. `find_fmi_row_export`**
+```python
+if 'nissan export' in str(row[col]).lower():
+# Fix:
+if 'nissan export' in str(row[col]).strip().lstrip("'\"").lower():
+```
+
+**5. `find_financial_indices`**
+```python
+if 'g&a' in str(row[col]).lower():
+# Fix:
+if 'g&a' in str(row[col]).strip().lstrip("'\"").lower():
+```
+
+**6. `find_oem_terms`**
+```python
+if 'oem' in str(row[col]).lower():
+# Fix:
+if 'oem' in str(row[col]).strip().lstrip("'\"").lower():
+```
+
+**7. `find_ocs_terms`**
+```python
+if 'ocs' in str(row[col]).lower():
+# Fix:
+if 'ocs' in str(row[col]).strip().lstrip("'\"").lower():
+```
+
+---
+
+## Better: Add a single helper at the top of `Submit_2_Helper_function.py`
+
+Rather than fixing every line individually, add this once near the top of the file:
+
+```python
+def _clean(val) -> str:
+    """Strip whitespace and leading apostrophes, return lowercase string."""
+    return str(val).strip().lstrip("'\"").lower()
+```
+
+Then replace all occurrences of `str(cell).lower()` with `_clean(cell)` across all the search functions. This covers the apostrophe issue, any trailing spaces, and case mismatches in one shot.
+
+---
+
+## Why this happens
+
+When Excel cells are prefixed with `'` (apostrophe), Excel treats the value as text — but when pandas reads it with `openpyxl`, that apostrophe is sometimes preserved in the string value. So `'nissan nv'` becomes the literal string `'nissan nv` in the DataFrame, which doesn't match the search term `nissan nv`.
+
+The `applymap` warnings are a separate issue — that's a **pandas version deprecation** (pandas ≥ 2.1 replaced `applymap` with `map`). For those, find every `.applymap(` in `Submit_2_Helper_function.py` inside `find_transfer_price_adjustment`, `tax_and_public`, `operating_profit`, `energy_tgk_68`, and replace with `.map(`.
