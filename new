@@ -1,0 +1,1523 @@
+import pandas as pd
+import numpy as np
+import re
+import time
+from Submit_2_Helper_function import (
+    find_row_numbers,
+    search_turnover_in_dataframe,
+    find_fmi_row_nv,
+    find_fmi_row_uc,
+    find_fmi_row_as,
+    search_omp_terms,
+    search_manufacturing_terms,
+    find_financial_indices,
+    paste_values_KPI_PL,
+    MZ_Sheet_terms,
+    find_oem_terms,
+    find_ocs_terms,
+    search_rd_terms,
+    find_fmi_row_export,
+    find_oem_terms,
+    find_R_and_D_File,
+    find_transfer_price_adjustment,
+    tax_and_public,
+    operating_profit,
+    relief_search_terms_new,
+    G_and_A_Reliev1,
+    extract_value_from_v8,
+    generate_excel_formula,
+    extract_value_formula_latest,
+    extract_formula,
+    find_outside_profit_1,
+    find_outside_profit_and_month_value,
+    find_second_column_for_outside_profit,
+    generate_excel_formula_249,
+    find_indices_feuil,
+    find_month_columns_Relief_KD,
+    find_month_columns_export,
+    find_op_and_month,
+    energy_tgk_68,
+    export_ITP_Export,
+    manage_sheet_visibility
+)
+import time
+from ACT import ACT
+
+from utils.logger import logger
+logger.info("Submit2 triggered")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  MODULE-LEVEL HELPERS FOR EMPTY-DATA SAFETY
+# ═══════════════════════════════════════════════════════════════════════════════
+
+ZERO = "=0"   # placeholder formula written to cells when source data is absent
+
+
+def _is_empty(df):
+    """Returns True if df is None, not a DataFrame, or has no rows/columns."""
+    if df is None:
+        return True
+    if not isinstance(df, pd.DataFrame):
+        return True
+    return df.empty
+
+
+def safe_row(val, fallback=0):
+    """Return val as int if valid, else fallback."""
+    if val is None:
+        return fallback
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def safe_col(val, fallback=0):
+    """Same as safe_row – separate name for readability."""
+    return safe_row(val, fallback)
+
+
+def safe_formula(fn, *args, **kwargs):
+    """
+    Call fn(*args, **kwargs).
+    If anything raises or returns None, return ZERO.
+    """
+    try:
+        result = fn(*args, **kwargs)
+        return result if result is not None else ZERO
+    except Exception:
+        return ZERO
+
+
+def safe_extract(path, sheet, row, col):
+    """
+    Wrapper around extract_formula that returns ZERO when the file is
+    missing or the call raises any exception.
+    """
+    import os
+    if not path or not os.path.isfile(str(path)):
+        return ZERO
+    try:
+        result = extract_formula(path, sheet, row, col)
+        return result if result else ZERO
+    except Exception:
+        return ZERO
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  MAIN FUNCTION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def calculate_alternate_value_1(
+        file_path_P_L, df_P_L_ROP_NE, df_P_L_HQ,
+        file_path_OSP, df_OSP,
+        file_path_HMF, df_HMF_Managerial,
+        file_path_New_KPI, df_P_L_New_KPI,
+        file_HQ_Item, df_hQ_items,
+        file_goodwill,
+        df_r_and_d,
+        df_MZ_conso,
+        df_P_L_Relief,
+        df_P_L_PL,
+        df_P_L_Reclass,
+        df_P_L_MCCP,
+        df_P_L_OCS,
+        df_New_KPI_CFMI,
+        df_New_goodwill,
+        df_Act,
+        file_paths_OSP_TGK, df_1c_osp,
+        file_paths_High_Level_Variance, df_high_variance_feuil,
+        file_paths_Relief_KD, df_Relief_KD,
+        file_paths_Purchase_Price, df_Purchase_Price,
+        file_paths_UP_Calc_Template_Simulation, df_UP_Calc_Template_Simulation,
+        file_paths_NANO_HFM, df_nano_hfm,
+        file_paths_ITP, df_itp,
+        file_path_Template, file_path_Template_1,
+        month_number, Var_Converter, var_Cfmi, ePWR_var,
+        connectivity_var, cafe_penalty_var,
+        file_path_Template_man_1, file_path_Template_man,
+        file_path_goodwill_template, output_path,
+        var_converter_bJPY, var_converter_mEUR):
+
+    print("processing11")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  LOCAL HELPERS (unchanged from original)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def find_columns_with_month(df, month_number):
+        for index, row in df.iterrows():
+            for column_name, value in row.items():
+                if str(value).lower() == 'apr':
+                    column_index_apr = df.columns.get_loc(column_name)
+                    adjusted_month_index_2 = (month_number - 4) % 12
+                    column_index_P_L_Relief = column_index_apr + adjusted_month_index_2
+                    return column_index_P_L_Relief
+        return None
+
+    def find_columns_with_month_r_and_d(df, month_number):
+        for index, row in df.iterrows():
+            for column_name, value in row.items():
+                if str(value).lower() == 'april':
+                    column_index_april = df.columns.get_loc(column_name)
+                    adjusted_month_index_2 = (month_number - 4) % 12
+                    column_index_P_L_Relief = column_index_april + adjusted_month_index_2
+                    return column_index_P_L_Relief
+        return None
+
+    def get_cell_value_and_formulas(df, row, column):
+        if isinstance(column, str):
+            try:
+                column = int(column)
+            except ValueError:
+                raise ValueError("Column index must be an integer.")
+        return df.iloc[row, column]
+
+    def get_value_or_zero(value):
+        return 0 if np.isnan(value) else value
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  ADJUSTED MONTH INDEX  (used throughout)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    adjusted_month_index_2 = (month_number - 4) % 12
+    column_index_P_L_Relief = 4 + adjusted_month_index_2
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  COLUMN INDICES  (safe – fallback to 0 on empty df)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    column_index_P_L = (
+        find_columns_with_month(df_P_L_PL, month_number)
+        if not _is_empty(df_P_L_PL) else 0
+    ) or 0
+
+    column_index_New_P_L = (
+        find_columns_with_month(df_P_L_ROP_NE, month_number)
+        if not _is_empty(df_P_L_ROP_NE) else 0
+    ) or 0
+
+    column_index_New_P_L_1 = (
+        find_columns_with_month(df_P_L_PL, month_number)
+        if not _is_empty(df_P_L_PL) else 0
+    ) or 0
+
+    P_L_New_KPI_index = (
+        find_columns_with_month(df_P_L_New_KPI, month_number)
+        if not _is_empty(df_P_L_New_KPI) else 0
+    ) or 0
+
+    column_index_df_MZ_conso = (
+        find_columns_with_month(df_MZ_conso, month_number)
+        if not _is_empty(df_MZ_conso) else 0
+    ) or 0
+
+    column_index_r_and_d = (
+        find_columns_with_month_r_and_d(df_r_and_d, month_number)
+        if not _is_empty(df_r_and_d) else 0
+    ) or 0
+
+    column_index_hq = (
+        find_columns_with_month_r_and_d(df_hQ_items, month_number)
+        if not _is_empty(df_hQ_items) else 0
+    ) or 0
+
+    column_index_hq_tgt = (
+        find_columns_with_month_r_and_d(df_P_L_HQ, month_number)
+        if not _is_empty(df_P_L_HQ) else 0
+    ) or 0
+
+    column_index_reclass = (
+        find_columns_with_month(df_P_L_Reclass, month_number)
+        if not _is_empty(df_P_L_Reclass) else 0
+    ) or 0
+
+    column_index_mccp = (
+        find_columns_with_month_r_and_d(df_P_L_MCCP, month_number)
+        if not _is_empty(df_P_L_MCCP) else 0
+    ) or 0
+
+    column_index_ocp = (
+        find_columns_with_month_r_and_d(df_P_L_OCS, month_number)
+        if not _is_empty(df_P_L_OCS) else 0
+    ) or 0
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  ROW LOOKUPS FROM df_P_L_ROP_NE
+    # ─────────────────────────────────────────────────────────────────────────
+
+    result_1 = (
+        find_row_numbers(df_P_L_ROP_NE)
+        if not _is_empty(df_P_L_ROP_NE) else {}
+    )
+
+    # Unpack all volume row lists (empty list = not found)
+    nissan_retail_volume_values = []
+    infiniti_retail_volume_values = []
+    datsun_retail_volume_values = []
+    registration_nissan_values = []
+    registration_infiniti_values = []
+    registration_datsun_values = []
+    tiv_values = []
+    market_share_values = []
+    european_wholesale_volume_nissan_values = []
+    european_wholesale_volume_infiniti_values = []
+    european_wholesale_volume_datsun_values = []
+    market_share_nissan_values = []
+    market_share_infiniti_values = []
+    market_share_datsun_values = []
+    opening_stock_values = []
+    nmuk_values = []
+    nmisa_values = []
+    nmgr_values = []
+    production_volume_values = []
+    purchase_volume_values = []
+    total_in_values = []
+    export_volume_nissan_values = []
+    export_volume_datsun_values = []
+    export_volume_infiniti_values = []
+    export_volume_values = []
+    wholesale_volume_total_values = []
+    renault_trucks_values = []
+    daimler_values = []
+    renault_values = []
+    gtr_idg_values = []
+    oem_volume_values = []
+    captives_values = []
+    total_out_values = []
+    scope_adjustment_values = []
+    closing_stock_values = []
+
+    for term, rows in result_1.items():
+        for row in rows:
+            if term == "nissanretailvolume":               nissan_retail_volume_values.append(row)
+            elif term == "infinitiretailvolume":           infiniti_retail_volume_values.append(row)
+            elif term == "datsunretailvolume":             datsun_retail_volume_values.append(row)
+            elif term == "registrationnissan":             registration_nissan_values.append(row)
+            elif term == "registrationinfiniti":           registration_infiniti_values.append(row)
+            elif term == "registrationdatsun":             registration_datsun_values.append(row)
+            elif term == "tiv":                            tiv_values.append(row)
+            elif term == "marketshare":                    market_share_values.append(row)
+            elif term == "europeanwholesalevolume-nissan": european_wholesale_volume_nissan_values.append(row)
+            elif term == "europeanwholesalevolume-infiniti": european_wholesale_volume_infiniti_values.append(row)
+            elif term == "europeanwholesalevolume-datsun": european_wholesale_volume_datsun_values.append(row)
+            elif term == "marketshare-nissan":             market_share_nissan_values.append(row)
+            elif term == "marketshare-infiniti":           market_share_infiniti_values.append(row)
+            elif term == "marketshare-datsun":             market_share_datsun_values.append(row)
+            elif term == "openingstock":                   opening_stock_values.append(row)
+            elif term == "nmuk":                           nmuk_values.append(row)
+            elif term == "nmisa":                          nmisa_values.append(row)
+            elif term == "nmgr":                           nmgr_values.append(row)
+            elif term == "productionvolume":               production_volume_values.append(row)
+            elif term == "purchasevolume":                 purchase_volume_values.append(row)
+            elif term == "totalin":                        total_in_values.append(row)
+            elif term == "exportvolumenissan":             export_volume_nissan_values.append(row)
+            elif term == "exportvolume-datsun":            export_volume_datsun_values.append(row)
+            elif term == "exportvolume-infiniti":          export_volume_infiniti_values.append(row)
+            elif term == "exportvolume":                   export_volume_values.append(row)
+            elif term == "wholesalevolumetotal":           wholesale_volume_total_values.append(row)
+            elif term == "renaulttrucks":                  renault_trucks_values.append(row)
+            elif term == "daimler":                        daimler_values.append(row)
+            elif term == "renault":                        renault_values.append(row)
+            elif term == "gtr[idg]":                       gtr_idg_values.append(row)
+            elif term == "oemvolume":                      oem_volume_values.append(row)
+            elif term == "captives":                       captives_values.append(row)
+            elif term == "totalout":                       total_out_values.append(row)
+            elif term == "scopeadjustment":                scope_adjustment_values.append(row)
+            elif term == "closingstock":                   closing_stock_values.append(row)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  TURNOVER ROW LOOKUPS
+    # ─────────────────────────────────────────────────────────────────────────
+
+    result_2 = (
+        search_turnover_in_dataframe(df_P_L_ROP_NE)
+        if not _is_empty(df_P_L_ROP_NE) else {}
+    )
+
+    nissan_nv_row_number        = result_2.get('nissan nv',           [None])[0]
+    nissan_bb_row_number        = result_2.get('nissan bb',           [None])[0]
+    datsun_nv_row_number        = result_2.get('datsun nv',           [None])[0]
+    datsun_bb_row_number        = result_2.get('datsun bb',           [None])[0]
+    infiniti_nv_row_number      = result_2.get('infiniti nv',         [None])[0]
+    infiniti_bb_row_number      = result_2.get('infiniti bb',         [None])[0]
+    infiniti_used_cars_row_number = result_2.get('infiniti used cars',[None])[0]
+    nissan_used_cars_row_number = result_2.get('nissan used cars',    [None])[0]
+    nissan_after_sales_row_number   = result_2.get('nissan after sales',  [None])[0]
+    datsun_after_sales_row_number   = result_2.get('datsun after sales',  [None])[0]
+    infiniti_after_sales_row_number = result_2.get('infiniti after sales',[None])[0]
+    export_nissan_row_number    = result_2.get('export nissan',       [None])[0]
+    export_datsun_row_number    = result_2.get('export datsun',       [None])[0]
+    export_infiniti_row_number  = result_2.get('export infiniti',     [None])[0]
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  MZ CONSO LOOKUPS
+    # ─────────────────────────────────────────────────────────────────────────
+
+    MZ_Sheet_term = (
+        MZ_Sheet_terms(df_MZ_conso)
+        if not _is_empty(df_MZ_conso) else {}
+    )
+
+    x83_sales_to_renault_index                       = MZ_Sheet_term.get("x83 sales to renault")
+    sales_to_renault_trucks_index                    = MZ_Sheet_term.get("sales to renault trucks")
+    production_parts_sales_to_inter_companies_index  = MZ_Sheet_term.get("production parts sales to inter-companies")
+    cantabria_sales_to_third_party_index             = MZ_Sheet_term.get("cantabria sales to third party")
+    parts_sales_to_renault_h4bu_camshaft_index       = MZ_Sheet_term.get("parts sales to renault (h4bu camshaft)")
+    scrap_sales_index                                = MZ_Sheet_term.get("scrap sales")
+    battery_plant_to_index                           = MZ_Sheet_term.get("battery plant to")
+    others_index_MZ                                  = MZ_Sheet_term.get("others")
+    other_adjustments_index                          = MZ_Sheet_term.get("other adjustments")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  FMI ROW LOOKUPS  (all fallback to 0 when df empty)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if not _is_empty(df_P_L_ROP_NE):
+        try:
+            (fmi_nissan_nv, turnover_nissan_nv, cos_nissan_nv, vme_nissan_nv,
+             fmi_datsun_nv, turnover_datsun_nv, cos_datsun_nv, vme_datsun_nv,
+             fmi_infiniti_nv, turnover_infiniti_nv, cos_infiniti_nv, vme_infiniti_nv,
+             fmi_total_nv, turnover_total_nv, cos_total_nv, vme_total_nv) = find_fmi_row_nv(df_P_L_ROP_NE)
+        except Exception:
+            fmi_nissan_nv = turnover_nissan_nv = cos_nissan_nv = vme_nissan_nv = \
+            fmi_datsun_nv = turnover_datsun_nv = cos_datsun_nv = vme_datsun_nv = \
+            fmi_infiniti_nv = turnover_infiniti_nv = cos_infiniti_nv = vme_infiniti_nv = \
+            fmi_total_nv = turnover_total_nv = cos_total_nv = vme_total_nv = 0
+    else:
+        fmi_nissan_nv = turnover_nissan_nv = cos_nissan_nv = vme_nissan_nv = \
+        fmi_datsun_nv = turnover_datsun_nv = cos_datsun_nv = vme_datsun_nv = \
+        fmi_infiniti_nv = turnover_infiniti_nv = cos_infiniti_nv = vme_infiniti_nv = \
+        fmi_total_nv = turnover_total_nv = cos_total_nv = vme_total_nv = 0
+
+    if not _is_empty(df_P_L_ROP_NE):
+        try:
+            (fmi_nissan_uc, turnover_nissan_uc, cos_nissan_uc, vme_nissan_uc,
+             fmi_datsun_uc, turnover_datsun_uc, cos_datsun_uc, vme_datsun_uc,
+             fmi_total_uc, turnover_total_uc, cos_total_uc, vme_total_uc) = find_fmi_row_uc(df_P_L_ROP_NE)
+        except Exception:
+            fmi_nissan_uc = turnover_nissan_uc = cos_nissan_uc = vme_nissan_uc = \
+            fmi_datsun_uc = turnover_datsun_uc = cos_datsun_uc = vme_datsun_uc = \
+            fmi_total_uc = turnover_total_uc = cos_total_uc = vme_total_uc = 0
+    else:
+        fmi_nissan_uc = turnover_nissan_uc = cos_nissan_uc = vme_nissan_uc = \
+        fmi_datsun_uc = turnover_datsun_uc = cos_datsun_uc = vme_datsun_uc = \
+        fmi_total_uc = turnover_total_uc = cos_total_uc = vme_total_uc = 0
+
+    if not _is_empty(df_P_L_ROP_NE):
+        try:
+            (fmi_nissan_as, turnover_nissan_as, cos_nissan_as, vme_nissan_as,
+             fmi_datsun_as, turnover_datsun_as, cos_datsun_as, vme_datsun_as,
+             fmi_infiniti_as, turnover_infiniti_as, cos_infiniti_as, vme_infiniti_as,
+             fmi_total_as, turnover_total_as, cos_total_as, vme_total_as) = find_fmi_row_as(df_P_L_ROP_NE)
+        except Exception:
+            fmi_nissan_as = turnover_nissan_as = cos_nissan_as = vme_nissan_as = \
+            fmi_datsun_as = turnover_datsun_as = cos_datsun_as = vme_datsun_as = \
+            fmi_infiniti_as = turnover_infiniti_as = cos_infiniti_as = vme_infiniti_as = \
+            fmi_total_as = turnover_total_as = cos_total_as = vme_total_as = 0
+    else:
+        fmi_nissan_as = turnover_nissan_as = cos_nissan_as = vme_nissan_as = \
+        fmi_datsun_as = turnover_datsun_as = cos_datsun_as = vme_datsun_as = \
+        fmi_infiniti_as = turnover_infiniti_as = cos_infiniti_as = vme_infiniti_as = \
+        fmi_total_as = turnover_total_as = cos_total_as = vme_total_as = 0
+
+    if not _is_empty(df_P_L_ROP_NE):
+        try:
+            (fmi_nissan_export, turnover_nissan_export, cos_nissan_export, vme_nissan_export,
+             fmi_datsun_export, turnover_datsun_export, cos_datsun_export, vme_datsun_export,
+             fmi_infiniti_export, turnover_infiniti_export, cos_infiniti_export, vme_infiniti_export,
+             fmi_total_export, turnover_total_export, cos_total_export, vme_total_export) = find_fmi_row_export(df_P_L_ROP_NE)
+        except Exception:
+            fmi_nissan_export = turnover_nissan_export = cos_nissan_export = vme_nissan_export = \
+            fmi_datsun_export = turnover_datsun_export = cos_datsun_export = vme_datsun_export = \
+            fmi_infiniti_export = turnover_infiniti_export = cos_infiniti_export = vme_infiniti_export = \
+            fmi_total_export = turnover_total_export = cos_total_export = vme_total_export = 0
+    else:
+        fmi_nissan_export = turnover_nissan_export = cos_nissan_export = vme_nissan_export = \
+        fmi_datsun_export = turnover_datsun_export = cos_datsun_export = vme_datsun_export = \
+        fmi_infiniti_export = turnover_infiniti_export = cos_infiniti_export = vme_infiniti_export = \
+        fmi_total_export = turnover_total_export = cos_total_export = vme_total_export = 0
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  OMP / MANUFACTURING / FINANCIAL / OEM / OCS / R&D LOOKUPS
+    # ─────────────────────────────────────────────────────────────────────────
+
+    search_omp_term = (
+        search_omp_terms(df_P_L_ROP_NE)
+        if not _is_empty(df_P_L_ROP_NE) else {}
+    )
+
+    x83_sales_to_renault_row                        = search_omp_term.get("x83 sales to renault")
+    print("Hi there", x83_sales_to_renault_row)
+    f91r_sales_to_renault_trucks_row                = search_omp_term.get("f91r sales to renault trucks")
+    production_parts_sales_to_inter_companies_row   = search_omp_term.get("production parts sales to inter-companies")
+    cantabria_sales_to_third_party_row              = search_omp_term.get("cantabria sales to third party")
+    parts_sales_to_renault_row                      = search_omp_term.get("parts sales to renault")
+    battery_plant_other_costs_row                   = search_omp_term.get("battery plant other costs")
+    scraps_sales_row                                = search_omp_term.get("scraps sales")
+    pensions_row                                    = search_omp_term.get("pensions")
+    others_row                                      = search_omp_term.get("others")
+
+    search_manufacturing_term = (
+        search_manufacturing_terms(df_P_L_ROP_NE)
+        if not _is_empty(df_P_L_ROP_NE) else {}
+    )
+
+    materials_costs_row                     = search_manufacturing_term.get("materials costs")
+    bo_cost_reduction_row                   = search_manufacturing_term.get("b/o cost reduction")
+    renault_tp_row                          = search_manufacturing_term.get("renault tp")
+    intercompany_parts_kd_row               = search_manufacturing_term.get("intercompany parts / kd")
+    inbound_freight_insurance_row           = search_manufacturing_term.get("inbound freight / insurance")
+    inbound_duty_row                        = search_manufacturing_term.get("inbound duty")
+    inhouse_direct_labour_row               = search_manufacturing_term.get("inhouse / direct labour")
+    battery_nmuk_row                        = search_manufacturing_term.get("battery (nmuk)")
+    events_row                              = search_manufacturing_term.get("events")
+    infiniti_mz_variable_row                = search_manufacturing_term.get("infiniti mz variable")
+    other_adjustments_row_manu_1            = search_manufacturing_term.get("other adjustments")
+    others_row_manu_1                       = search_manufacturing_term.get("others")
+    core_fixed_row                          = search_manufacturing_term.get("core fixed")
+    pic_nissan_row                          = search_manufacturing_term.get("pic (nissan)")
+    regional_cost_row                       = search_manufacturing_term.get("regional cost")
+    vendor_tooling_depreciation_row         = search_manufacturing_term.get("vendor tooling depreciation")
+    projects_row                            = search_manufacturing_term.get("projects")
+    nesas_nisa_manufacturing_row            = search_manufacturing_term.get("nesas/nisa manufacturing")
+    battery_fixed_row                       = search_manufacturing_term.get("battery fixed")
+    infiniti_fixed_cost_gd1a_row            = search_manufacturing_term.get("infiniti fixed cost (gd1a)")
+    maintenance_of_existing_models_dd_row   = search_manufacturing_term.get("maintenance of existing models (d&d)")
+    gd1a_top_position_shift_to_icp_row      = search_manufacturing_term.get("gd1a top position shift to icp")
+    supplier_claims_other_row               = search_manufacturing_term.get("supplier claims & other")
+
+    if not _is_empty(df_P_L_ROP_NE):
+        try:
+            labour_costs_row, IS_Costs_row, Deprecation_row, provision_for_doutful_row, Overhead_row = \
+                find_financial_indices(df_P_L_ROP_NE)
+        except Exception:
+            labour_costs_row = IS_Costs_row = Deprecation_row = provision_for_doutful_row = Overhead_row = [0, 0, 0]
+    else:
+        labour_costs_row = IS_Costs_row = Deprecation_row = provision_for_doutful_row = Overhead_row = [0, 0, 0]
+
+    if not _is_empty(df_P_L_ROP_NE):
+        try:
+            turnover_index, standard_index, marginal_index, vehicle_index, logistics_index, \
+                royalty_index, others_index, EOP_index = find_oem_terms(df_P_L_ROP_NE)
+        except Exception:
+            turnover_index = standard_index = marginal_index = vehicle_index = \
+            logistics_index = royalty_index = others_index = EOP_index = [0, 0, 0]
+    else:
+        turnover_index = standard_index = marginal_index = vehicle_index = \
+        logistics_index = royalty_index = others_index = EOP_index = [0, 0, 0]
+
+    ocs_row = (
+        find_ocs_terms(df_P_L_ROP_NE)
+        if not _is_empty(df_P_L_ROP_NE) else [0]
+    ) or [0]
+
+    functional_r_d = (
+        search_rd_terms(df_P_L_ROP_NE)
+        if not _is_empty(df_P_L_ROP_NE) else {}
+    )
+    functional_r_d_row     = functional_r_d.get("functional r&d")
+    non_functional_r_d_row = functional_r_d.get("non functional r&d")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  R&D FILE LOOKUPS
+    # ─────────────────────────────────────────────────────────────────────────
+
+    find_R_and_D_file_row = (
+        find_R_and_D_File(df_r_and_d)
+        if not _is_empty(df_r_and_d) else {}
+    )
+    print(find_R_and_D_file_row)
+
+    functional_r_and_d_revenue     = find_R_and_D_file_row.get("functional r&d revenue")
+    functional_r_and_d_cost        = find_R_and_D_file_row.get("functional r&d cost")
+    non_functional_r_and_d_revenue = find_R_and_D_file_row.get("non functional r&d revenue")
+    non_functional_r_and_d_cost    = find_R_and_D_file_row.get("non functional r&d cost")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  HQ ITEMS LOOKUPS
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if not _is_empty(df_hQ_items):
+        try:
+            transfer_price_adjustment_row = find_transfer_price_adjustment(df_hQ_items)
+        except Exception:
+            transfer_price_adjustment_row = [0]
+        try:
+            energy_tag_68_row = energy_tgk_68(df_hQ_items)
+        except Exception:
+            energy_tag_68_row = [0]
+    else:
+        transfer_price_adjustment_row = [0]
+        energy_tag_68_row = [0]
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  HQ TAGETIK LOOKUPS
+    # ─────────────────────────────────────────────────────────────────────────
+
+    tax_and_public_row = (
+        tax_and_public(df_P_L_HQ)
+        if not _is_empty(df_P_L_HQ) else [0]
+    ) or [0]
+
+    operating_profit_row = (
+        operating_profit(df_P_L_HQ)
+        if not _is_empty(df_P_L_HQ) else [0]
+    ) or [0]
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  RECLASS / RELIEF LOOKUPS
+    # ─────────────────────────────────────────────────────────────────────────
+
+    reclass_var_row = (
+        G_and_A_Reliev1(df_P_L_Reclass)
+        if not _is_empty(df_P_L_Reclass) else 0
+    ) or 0
+
+    relief_search_terms_row = (
+        relief_search_terms_new(df_P_L_Relief)
+        if not _is_empty(df_P_L_Relief) else {}
+    )
+
+    recall_service_campaigns_row1       = relief_search_terms_row.get("recall service/campaigns")
+    kd_itp_nmuk_row1                    = relief_search_terms_row.get("kd itp (nmuk)")
+    kd_itp_nmisa_row2                   = relief_search_terms_row.get("kd itp (nmisa)")
+    kd_itp_nmgr_row2                    = relief_search_terms_row.get("kd itp (nmgr)")
+    connectivity_row2                   = relief_search_terms_row.get("connectivity")
+    itp_cbu_nissan_row2                 = relief_search_terms_row.get("itp cbu nissan")
+    itp_cbu_infiniti_row2               = relief_search_terms_row.get("itp cbu infiniti")
+    iln_export_nmuk_row2                = relief_search_terms_row.get("iln export (nmuk)")
+    iln_export_nmisa_row2               = relief_search_terms_row.get("iln export (nmisa)")
+    error_correction_in_mz_row2         = relief_search_terms_row.get("error correction in mz (?)")
+    export                              = relief_search_terms_row.get("export")
+    mz_impairment_row2                  = relief_search_terms_row.get("mz impairment")
+    g_a_impairment_row2                 = relief_search_terms_row.get("g&a impairment")
+    compact_ev_vt_impairment            = relief_search_terms_row.get("compact ev/vt impairment")
+    battery_kw_itp_nmuk                 = relief_search_terms_row.get("battery 40 kw itp ( nmuk )")
+    battery_kw_itp_nmisa                = relief_search_terms_row.get("battery 40 kw itp ( nmisa )")
+    battery_cancelation_row             = relief_search_terms_row.get("battery cancelation")
+    error_correction_in_mz_row          = relief_search_terms_row.get("error correction in mz (after wd5)")
+    top_daimler_correction_row          = relief_search_terms_row.get("top daimler correction (after wd5)")
+    infiniti_fmi_correction_row         = relief_search_terms_row.get("infiniti fmi correction (after wd5)")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  OSP / MCCP / OCS LOOKUPS
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if not _is_empty(df_OSP) and file_path_OSP:
+        try:
+            row_num_OSP_1, col_val_OSP_1 = find_outside_profit_and_month_value(df_OSP, month_number)
+            row_num_OSP_2, col_val_OSP_2 = find_second_column_for_outside_profit(df_OSP, month_number)
+        except Exception:
+            row_num_OSP_1 = col_val_OSP_1 = row_num_OSP_2 = col_val_OSP_2 = 0
+    else:
+        row_num_OSP_1 = col_val_OSP_1 = row_num_OSP_2 = col_val_OSP_2 = 0
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  HIGH LEVEL VARIANCE LOOKUPS
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if not _is_empty(df_high_variance_feuil) and file_paths_High_Level_Variance:
+        try:
+            row_idx_feuil, col_idx_feuil = find_indices_feuil(df_high_variance_feuil, month_number)
+            col_idx_feuil = col_idx_feuil + 1 + adjusted_month_index_2
+        except Exception:
+            row_idx_feuil = col_idx_feuil = 0
+    else:
+        row_idx_feuil = col_idx_feuil = 0
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  RELIEF KD LOOKUPS
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if not _is_empty(df_Relief_KD) and file_paths_Relief_KD:
+        try:
+            column_indices_relief_KD = find_month_columns_Relief_KD(df_Relief_KD, month_number)
+            print(f"Column indices for April occurrences: {column_indices_relief_KD}")
+        except Exception:
+            column_indices_relief_KD = [0, 0]
+    else:
+        column_indices_relief_KD = [0, 0]
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  ITP / PURCHASE PRICE LOOKUPS
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if not _is_empty(df_itp) and file_paths_ITP:
+        try:
+            column_indices_export = find_month_columns_export(df_itp, month_number)
+            row_indices_export = export_ITP_Export(df_itp)
+            print(f"Column indices for M04 occurrences: {column_indices_export}")
+        except Exception:
+            column_indices_export = [0, 0]
+            row_indices_export = [0]
+    else:
+        column_indices_export = [0, 0]
+        row_indices_export = [0]
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  NANO HFM LOOKUPS
+    # ─────────────────────────────────────────────────────────────────────────
+
+    if not _is_empty(df_nano_hfm) and file_paths_NANO_HFM:
+        try:
+            row_index_hq_tagetik, col_index_hq_tagetik = find_op_and_month(df_nano_hfm, month_number)
+        except Exception:
+            row_index_hq_tagetik = col_index_hq_tagetik = 0
+    else:
+        row_index_hq_tagetik = col_index_hq_tagetik = 0
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  extract_value_formula_latest  (P&L Actual UED value)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    try:
+        formula_result_ued = (
+            extract_value_formula_latest(file_path_P_L, month_number)
+            if file_path_P_L else ZERO
+        ) or ZERO
+    except Exception:
+        formula_result_ued = ZERO
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  KPI INDEX ADJUST
+    # ─────────────────────────────────────────────────────────────────────────
+
+    P_L_New_KPI_index = P_L_New_KPI_index + 1
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  HQ ITEMS FORMULAS
+    # ─────────────────────────────────────────────────────────────────────────
+
+    sheet_name = 'Sheet1'
+    tpr = transfer_price_adjustment_row[0]
+
+    formula_hq_1  = safe_formula(generate_excel_formula, tpr + 5,  column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_2  = safe_formula(generate_excel_formula, tpr + 3,  column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_3  = safe_formula(generate_excel_formula, tpr + 6,  column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_4  = safe_formula(generate_excel_formula, tpr + 10, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_5  = safe_formula(generate_excel_formula, tpr + 18, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_6  = safe_formula(generate_excel_formula, tpr + 21, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_7  = safe_formula(generate_excel_formula, tpr + 22, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_8  = safe_formula(generate_excel_formula, tpr + 26, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_9  = safe_formula(generate_excel_formula, tpr + 4,  column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_10 = safe_formula(generate_excel_formula, tpr + 34, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_11 = safe_formula(generate_excel_formula, tpr + 1,  column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_12 = safe_formula(generate_excel_formula, tpr + 20, column_index_hq, sheet_name, file_HQ_Item)
+
+    formula_hq_sum = (
+        f"=({formula_hq_1[1:]} + {formula_hq_2[1:]}+ {formula_hq_3[1:]}+ {formula_hq_4[1:]}+ "
+        f"{formula_hq_5[1:]}+ {formula_hq_6[1:]} + {formula_hq_7[1:]}+ {formula_hq_8[1:]}+ "
+        f"{formula_hq_9[1:]}+ {formula_hq_10[1:]}+ {formula_hq_11[1:]}+ {formula_hq_12[1:]}) / 1000000"
+    )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  HQ TAGETIK FORMULAS
+    # ─────────────────────────────────────────────────────────────────────────
+
+    sheet_name = 'HQ Tagetik'
+    tpr_t = tax_and_public_row[0]
+    opr   = operating_profit_row[0]
+
+    formula_hq_tax_1     = safe_formula(generate_excel_formula, tpr_t + 3,  column_index_hq_tgt, sheet_name)
+    formula_hq_tax_2     = safe_formula(generate_excel_formula, tpr_t + 1,  column_index_hq_tgt, sheet_name)
+    formula_hq_tax_3     = safe_formula(generate_excel_formula, tpr_t + 20, column_index_hq_tgt, sheet_name)
+    formula_hq_tax_4     = safe_formula(generate_excel_formula, tpr_t + 5,  column_index_hq_tgt, sheet_name)
+    formula_hq_tax_5     = safe_formula(generate_excel_formula, tpr_t + 22, column_index_hq_tgt, sheet_name)
+    formula_hq_tax_6     = safe_formula(generate_excel_formula, tpr_t + 7,  column_index_hq_tgt, sheet_name)
+    formula_hq_tax_7     = safe_formula(generate_excel_formula, tpr_t + 8,  column_index_hq_tgt, sheet_name)
+    formula_hq_tax_8     = safe_formula(generate_excel_formula, tpr_t + 16, column_index_hq_tgt, sheet_name)
+    formula_hq_tax_9     = safe_formula(generate_excel_formula, tpr_t + 18, column_index_hq_tgt, sheet_name)
+    formula_hq_tax_op_10 = safe_formula(generate_excel_formula, opr,        column_index_hq_tgt, sheet_name)
+    formula_hq_tax_op_11 = safe_formula(generate_excel_formula, opr + 1,    column_index_hq_tgt, sheet_name)
+    formula_hq_tax_op_12 = safe_formula(generate_excel_formula, opr + 2,    column_index_hq_tgt, sheet_name)
+    formula_hq_tax_op_13 = safe_formula(generate_excel_formula, opr + 3,    column_index_hq_tgt, sheet_name)
+
+    formula_hq_tax_sum = (
+        f"=({formula_hq_tax_1[1:]} + {formula_hq_tax_2[1:]}+ {formula_hq_tax_3[1:]}+ "
+        f"{formula_hq_tax_4[1:]}+ {formula_hq_tax_5[1:]}+ {formula_hq_tax_6[1:]} + "
+        f"{formula_hq_tax_7[1:]}+ {formula_hq_tax_8[1:]}+ {formula_hq_tax_9[1:]}+ "
+        f"{formula_hq_tax_op_10[1:]}+ {formula_hq_tax_op_11[1:]}+ {formula_hq_tax_op_12[1:]}+ "
+        f"{formula_hq_tax_op_13[1:]}) / 1000000"
+    )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  OSP FORMULAS
+    # ─────────────────────────────────────────────────────────────────────────
+
+    sheet_name = 'Master'
+    formula_OSP_1 = safe_formula(generate_excel_formula, safe_row(row_num_OSP_1) - 5, safe_col(col_val_OSP_1), sheet_name)
+    formula_OSP_2 = safe_formula(generate_excel_formula, safe_row(row_num_OSP_2) - 5, safe_col(col_val_OSP_2), sheet_name)
+    formula_OSP_2 = f"=-{formula_OSP_2[1:]}" if formula_OSP_2 != ZERO else ZERO
+
+    sheet_name_1 = 'New KPI Actual'
+    formula_OSP_ex_1  = safe_extract(file_path_Template_man, sheet_name_1, 239, P_L_New_KPI_index - 1)
+    formula_OSP_ex_sum = (
+        f"={formula_OSP_1[1:]}-{formula_OSP_ex_1[1:]}"
+        if formula_OSP_1 != ZERO or formula_OSP_ex_1 != ZERO else ZERO
+    )
+    print(file_path_Template)
+
+    # MCCP formulas
+    sheet_name = 'MCPP'
+    formula_mccp_1 = safe_formula(generate_excel_formula, 208, column_index_mccp, sheet_name)
+    formula_mccp_2 = safe_formula(generate_excel_formula, 322, column_index_mccp, sheet_name)
+
+    # OCS formulas
+    sheet_name = 'OCS details'
+    formula_ocp_1    = safe_formula(generate_excel_formula, 74, column_index_ocp, sheet_name)
+    formula_ocp_2    = safe_formula(generate_excel_formula, 81, column_index_ocp, sheet_name)
+    formula_ocp_ex_1 = safe_extract(file_path_Template_man, sheet_name_1, 482, P_L_New_KPI_index - 1)
+    formula_ocp_ex_2 = safe_extract(file_path_Template_man, sheet_name_1, 500, P_L_New_KPI_index - 1)
+    formula_sum_ocp_1 = f"={formula_ocp_ex_1[1:]}-({formula_ocp_1[1:]}+{formula_ocp_2[1:]})/10^6"
+    formula_sum_ocp_2 = f"={formula_ocp_ex_2[1:]}+({formula_ocp_1[1:]}+{formula_ocp_2[1:]})/10^6"
+
+    # OSP TGK formulas
+    act_osp_adj = 1 + adjusted_month_index_2
+    sheet_name_summary = 'Summary'
+    formula_ocp_tgk_1 = safe_formula(generate_excel_formula, 4,  act_osp_adj, sheet_name_summary, file_paths_OSP_TGK) if file_paths_OSP_TGK else ZERO
+    formula_ocp_tgk_2 = safe_formula(generate_excel_formula, 11, act_osp_adj, sheet_name_summary, file_paths_OSP_TGK) if file_paths_OSP_TGK else ZERO
+    formula_ocp_tgk_3 = safe_formula(generate_excel_formula, 18, act_osp_adj, sheet_name_summary, file_paths_OSP_TGK) if file_paths_OSP_TGK else ZERO
+    formula_ocp_tgk_4 = safe_formula(generate_excel_formula, 25, act_osp_adj, sheet_name_summary, file_paths_OSP_TGK) if file_paths_OSP_TGK else ZERO
+
+    # formula_249
+    try:
+        formula_249 = generate_excel_formula_249(month_number, file_path_OSP) if file_path_OSP else ZERO
+    except Exception:
+        formula_249 = ZERO
+    formula_ex_249     = safe_extract(file_path_Template_man, sheet_name_1, 249, P_L_New_KPI_index - 1)
+    formula_ex_sum_249 = f"={formula_249[1:]}-{formula_ex_249[1:]}" if formula_249 != ZERO else ZERO
+    formula_ex_sum_249 = formula_ex_sum_249.replace("\\", "/")
+    print("Hiee", formula_ex_sum_249)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  RELIEF FORMULAS
+    # ─────────────────────────────────────────────────────────────────────────
+
+    sheet_name_feuil   = 'Feuil1'
+    sheet_name_relief_kd = 'vs 2+10'
+    sheet_name_rel     = 'Relief'
+
+    formula_relief_1 = safe_formula(generate_excel_formula, row_idx_feuil, col_idx_feuil, sheet_name_feuil, file_paths_High_Level_Variance) if file_paths_High_Level_Variance else ZERO
+
+    formula_ex_relief_1 = safe_extract(file_path_Template_man, sheet_name_rel, 80, column_index_P_L_Relief)
+
+    if month_number == 4:
+        formula_relief_12 = f"={connectivity_var}"
+    else:
+        formula_ex_relief_5 = safe_extract(file_path_Template_man, sheet_name_rel, 87, column_index_P_L_Relief)
+        formula_relief_12 = f"=({connectivity_var})-{formula_ex_relief_5[1:]}"
+
+    _r2 = safe_formula(generate_excel_formula, 45, column_indices_relief_KD[0], sheet_name_relief_kd, file_paths_Relief_KD) if file_paths_Relief_KD else ZERO
+    _r3 = safe_formula(generate_excel_formula, 30, column_indices_relief_KD[0], sheet_name_relief_kd, file_paths_Relief_KD) if file_paths_Relief_KD else ZERO
+    _r4 = safe_formula(generate_excel_formula, 15, column_indices_relief_KD[0], sheet_name_relief_kd, file_paths_Relief_KD) if file_paths_Relief_KD else ZERO
+    _r5 = safe_formula(generate_excel_formula, 45, column_indices_relief_KD[1], sheet_name_relief_kd, file_paths_Relief_KD) if file_paths_Relief_KD else ZERO
+    _r6 = safe_formula(generate_excel_formula, 30, column_indices_relief_KD[1], sheet_name_relief_kd, file_paths_Relief_KD) if file_paths_Relief_KD else ZERO
+
+    formula_relief_2 = f"=-({_r2[1:]})/1000-{formula_ex_relief_1[1:]}"
+    formula_relief_3 = f"=-({_r3[1:]})/1000"
+    formula_relief_4 = f"=-({_r4[1:]})/1000"
+    formula_relief_5 = f"=-({_r5[1:]})/1000"
+    formula_relief_6 = f"=-({_r6[1:]})/1000"
+
+    sheet_name = 'BP25'
+    sheet_pivot = 'Summary pivot'
+    formula_relief_9  = safe_formula(generate_excel_formula, row_indices_export[0], column_indices_export[0], sheet_name, file_paths_ITP) if file_paths_ITP else ZERO
+    _r10 = safe_formula(generate_excel_formula, 14, 10, sheet_pivot, file_paths_Purchase_Price) if file_paths_Purchase_Price else ZERO
+    formula_relief_10 = f"=-({_r10[1:]})/10^6"
+    print("Hilo", formula_relief_10)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  HQ TAGETIK EXTRA FORMULAS
+    # ─────────────────────────────────────────────────────────────────────────
+
+    sheet_name_hq_tgk = 'HQ Tagetik'
+    hq_formula_ex_1 = safe_extract(file_path_Template_man, sheet_name_hq_tgk, 46, column_index_hq_tgt)
+    hq_formula_ex_2 = safe_extract(file_path_Template_man, sheet_name_hq_tgk, 47, column_index_hq_tgt)
+    hq_formula_ex_3 = safe_extract(file_path_Template_man, sheet_name_hq_tgk, 48, column_index_hq_tgt)
+    hq_formula_ex_4 = safe_extract(file_path_Template_man, sheet_name_hq_tgk, 49, column_index_hq_tgt)
+
+    # NANO HFM formulas
+    sheet_name_actual = 'Actual'
+    _nano = safe_formula(generate_excel_formula, row_index_hq_tagetik, col_index_hq_tagetik, sheet_name_actual, file_paths_NANO_HFM) if file_paths_NANO_HFM else ZERO
+    formula_hq_tagetik_1 = f"={_nano[1:]}*10^3" if _nano != ZERO else ZERO
+
+    sheet_name_up = 'UP_Calculation'
+    _up = safe_formula(generate_excel_formula, 18, 25, sheet_name_up, file_paths_UP_Calc_Template_Simulation) if file_paths_UP_Calc_Template_Simulation else ZERO
+    formula_hq_tagetik_2 = f"={_up[1:]}*10^6" if _up != ZERO else ZERO
+
+    formula_hq_tagetik_6 = safe_formula(generate_excel_formula, energy_tag_68_row[0], column_index_hq, 'Sheet1', file_HQ_Item)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  HQ TDK FORMULAS (rows relative to transfer_price_adjustment_row)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    sheet_name = 'Sheet1'
+    formula_hq_tdk_3  = safe_formula(generate_excel_formula, tpr - 1,  column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_4  = safe_formula(generate_excel_formula, tpr,      column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_5  = safe_formula(generate_excel_formula, tpr + 1,  column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_6  = safe_formula(generate_excel_formula, tpr + 2,  column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_7  = safe_formula(generate_excel_formula, tpr + 3,  column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_8  = safe_formula(generate_excel_formula, tpr + 4,  column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_9  = safe_formula(generate_excel_formula, tpr + 5,  column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_10 = safe_formula(generate_excel_formula, tpr + 6,  column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_11 = safe_formula(generate_excel_formula, tpr + 7,  column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_12 = safe_formula(generate_excel_formula, tpr + 8,  column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_13 = safe_formula(generate_excel_formula, tpr + 9,  column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_14 = safe_formula(generate_excel_formula, tpr + 10, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_15 = safe_formula(generate_excel_formula, tpr + 11, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_16 = safe_formula(generate_excel_formula, tpr + 12, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_17 = safe_formula(generate_excel_formula, tpr + 13, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_18 = safe_formula(generate_excel_formula, tpr + 14, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_19 = safe_formula(generate_excel_formula, tpr + 15, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_20 = safe_formula(generate_excel_formula, tpr + 16, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_21 = safe_formula(generate_excel_formula, tpr + 17, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_22 = safe_formula(generate_excel_formula, tpr + 18, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_23 = safe_formula(generate_excel_formula, tpr + 19, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_24 = safe_formula(generate_excel_formula, tpr + 20, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_25 = safe_formula(generate_excel_formula, tpr + 21, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_26 = safe_formula(generate_excel_formula, tpr + 22, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_27 = safe_formula(generate_excel_formula, tpr + 23, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_28 = safe_formula(generate_excel_formula, tpr + 24, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_29 = safe_formula(generate_excel_formula, tpr + 25, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_30 = safe_formula(generate_excel_formula, tpr + 26, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_31 = safe_formula(generate_excel_formula, tpr + 27, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_32 = safe_formula(generate_excel_formula, tpr + 28, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_33 = safe_formula(generate_excel_formula, tpr + 29, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_34 = safe_formula(generate_excel_formula, tpr + 30, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_35 = safe_formula(generate_excel_formula, tpr + 31, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_36 = safe_formula(generate_excel_formula, tpr + 32, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_37 = safe_formula(generate_excel_formula, tpr + 33, column_index_hq, sheet_name, file_HQ_Item)
+    formula_hq_tdk_38 = safe_formula(generate_excel_formula, tpr + 34, column_index_hq, sheet_name, file_HQ_Item)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  ROP NE FORMULAS  (use safe_formula + safe list indexing)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _r(lst):
+        """Return first element of list or 0."""
+        return lst[0] if lst else 0
+
+    sheet_name = 'ROP NE (Tagetik)'
+
+    formula_5  = safe_formula(generate_excel_formula, _r(nissan_retail_volume_values),              column_index_New_P_L, sheet_name)
+    formula_6  = safe_formula(generate_excel_formula, _r(infiniti_retail_volume_values),            column_index_New_P_L, sheet_name)
+    formula_7  = safe_formula(generate_excel_formula, _r(datsun_retail_volume_values),              column_index_New_P_L, sheet_name)
+    formula_9  = safe_formula(generate_excel_formula, _r(tiv_values),                               column_index_New_P_L, sheet_name)
+    formula_10 = safe_formula(generate_excel_formula, _r(market_share_nissan_values),               column_index_New_P_L, sheet_name)
+    formula_11 = safe_formula(generate_excel_formula, _r(market_share_infiniti_values),             column_index_New_P_L, sheet_name)
+    formula_12 = safe_formula(generate_excel_formula, _r(market_share_datsun_values),               column_index_New_P_L, sheet_name)
+    formula_13 = safe_formula(generate_excel_formula, _r(opening_stock_values),                     column_index_New_P_L, sheet_name)
+    formula_14 = safe_formula(generate_excel_formula, _r(nmuk_values),                              column_index_New_P_L, sheet_name)
+    formula_15 = safe_formula(generate_excel_formula, _r(nmisa_values),                             column_index_New_P_L, sheet_name)
+    formula_16 = safe_formula(generate_excel_formula, _r(nmgr_values),                              column_index_New_P_L, sheet_name)
+    formula_17 = safe_formula(generate_excel_formula, _r(purchase_volume_values),                   column_index_New_P_L, sheet_name)
+    formula_18 = safe_formula(generate_excel_formula, _r(total_in_values),                          column_index_New_P_L, sheet_name)
+    formula_19 = safe_formula(generate_excel_formula, _r(european_wholesale_volume_nissan_values),  column_index_New_P_L, sheet_name)
+    formula_20 = safe_formula(generate_excel_formula, _r(european_wholesale_volume_infiniti_values),column_index_New_P_L, sheet_name)
+    formula_21 = safe_formula(generate_excel_formula, _r(european_wholesale_volume_datsun_values),  column_index_New_P_L, sheet_name)
+    formula_22 = safe_formula(generate_excel_formula, _r(export_volume_nissan_values),              column_index_New_P_L, sheet_name)
+    formula_23 = safe_formula(generate_excel_formula, _r(export_volume_infiniti_values),            column_index_New_P_L, sheet_name)
+    formula_24 = safe_formula(generate_excel_formula, _r(renault_trucks_values),                    column_index_New_P_L, sheet_name)
+    formula_25 = safe_formula(generate_excel_formula, _r(daimler_values),                           column_index_New_P_L, sheet_name)
+    formula_26 = safe_formula(generate_excel_formula, _r(renault_values),                           column_index_New_P_L, sheet_name)
+    formula_27 = safe_formula(generate_excel_formula, _r(gtr_idg_values),                           column_index_New_P_L, sheet_name)
+    formula_28 = safe_formula(generate_excel_formula, _r(captives_values),                          column_index_New_P_L, sheet_name)
+    formula_29 = safe_formula(generate_excel_formula, _r(scope_adjustment_values),                  column_index_New_P_L, sheet_name)
+    formula_30 = safe_formula(generate_excel_formula, _r(closing_stock_values),                     column_index_New_P_L, sheet_name)
+
+    formula_new_100 = safe_formula(generate_excel_formula, 15, 18, sheet_name)
+    formula_new_101 = safe_formula(generate_excel_formula, 17, 18, sheet_name)
+    formula_new_102 = safe_formula(generate_excel_formula, 19, 18, sheet_name)
+
+    formula_39 = safe_formula(generate_excel_formula, safe_row(nissan_nv_row_number),        column_index_New_P_L, sheet_name)
+    formula_40 = safe_formula(generate_excel_formula, safe_row(nissan_bb_row_number),        column_index_New_P_L, sheet_name)
+    formula_41 = safe_formula(generate_excel_formula, safe_row(infiniti_nv_row_number),      column_index_New_P_L, sheet_name)
+    formula_42 = safe_formula(generate_excel_formula, safe_row(infiniti_bb_row_number),      column_index_New_P_L, sheet_name)
+    formula_43 = safe_formula(generate_excel_formula, safe_row(datsun_nv_row_number),        column_index_New_P_L, sheet_name)
+    formula_44 = safe_formula(generate_excel_formula, safe_row(datsun_bb_row_number),        column_index_New_P_L, sheet_name)
+    formula_45 = safe_formula(generate_excel_formula, safe_row(nissan_used_cars_row_number), column_index_New_P_L, sheet_name)
+    formula_46 = safe_formula(generate_excel_formula, safe_row(infiniti_used_cars_row_number),column_index_New_P_L, sheet_name)
+    formula_47 = safe_formula(generate_excel_formula, safe_row(nissan_after_sales_row_number),column_index_New_P_L, sheet_name)
+    formula_48 = safe_formula(generate_excel_formula, safe_row(infiniti_after_sales_row_number),column_index_New_P_L, sheet_name)
+    formula_49 = safe_formula(generate_excel_formula, safe_row(datsun_after_sales_row_number), column_index_New_P_L, sheet_name)
+    formula_50 = safe_formula(generate_excel_formula, safe_row(export_nissan_row_number),   column_index_New_P_L, sheet_name)
+    formula_51 = safe_formula(generate_excel_formula, safe_row(export_infiniti_row_number), column_index_New_P_L, sheet_name)
+
+    # MZ conso formulas
+    sheet_name = 'MZ conso TGK'
+
+    def _idx(val):
+        """Return first element of list/tuple or 0."""
+        return val[0] if val else 0
+
+    formula_52 = safe_formula(generate_excel_formula, _idx(x83_sales_to_renault_index),                      column_index_df_MZ_conso, sheet_name)
+    formula_53 = safe_formula(generate_excel_formula, _idx(sales_to_renault_trucks_index),                   column_index_df_MZ_conso, sheet_name)
+    formula_54 = safe_formula(generate_excel_formula, _idx(production_parts_sales_to_inter_companies_index), column_index_df_MZ_conso, sheet_name)
+    formula_55 = safe_formula(generate_excel_formula, _idx(cantabria_sales_to_third_party_index),            column_index_df_MZ_conso, sheet_name)
+    formula_56 = safe_formula(generate_excel_formula, _idx(parts_sales_to_renault_h4bu_camshaft_index),      column_index_df_MZ_conso, sheet_name)
+    formula_57 = safe_formula(generate_excel_formula, _idx(scrap_sales_index),                               column_index_df_MZ_conso, sheet_name)
+    formula_58 = safe_formula(generate_excel_formula, _idx(battery_plant_to_index),                          column_index_df_MZ_conso, sheet_name)
+    formula_59 = safe_formula(generate_excel_formula, _idx(others_index_MZ),                                 column_index_df_MZ_conso, sheet_name)
+
+    # ROP NE – FMI / Turnover formulas
+    sheet_name = 'ROP NE (Tagetik)'
+
+    formula_60 = safe_formula(generate_excel_formula, turnover_nissan_nv,  column_index_New_P_L, sheet_name)
+    formula_61 = safe_formula(generate_excel_formula, cos_nissan_nv,       column_index_New_P_L, sheet_name)
+    formula_62 = safe_formula(generate_excel_formula, vme_nissan_nv,       column_index_New_P_L, sheet_name)
+    formula_63 = safe_formula(generate_excel_formula, fmi_nissan_nv,       column_index_New_P_L, sheet_name)
+    formula_64 = safe_formula(generate_excel_formula, turnover_datsun_nv,  column_index_New_P_L, sheet_name)
+    formula_65 = safe_formula(generate_excel_formula, cos_datsun_nv,       column_index_New_P_L, sheet_name)
+    formula_66 = safe_formula(generate_excel_formula, vme_datsun_nv,       column_index_New_P_L, sheet_name)
+    formula_67 = safe_formula(generate_excel_formula, fmi_datsun_nv,       column_index_New_P_L, sheet_name)
+    formula_68 = safe_formula(generate_excel_formula, turnover_infiniti_nv,column_index_New_P_L, sheet_name)
+    formula_69 = safe_formula(generate_excel_formula, cos_infiniti_nv,     column_index_New_P_L, sheet_name)
+    formula_70 = safe_formula(generate_excel_formula, vme_infiniti_nv,     column_index_New_P_L, sheet_name)
+    formula_71 = safe_formula(generate_excel_formula, fmi_infiniti_nv,     column_index_New_P_L, sheet_name)
+
+    formula_72 = safe_formula(generate_excel_formula, turnover_nissan_uc,  column_index_New_P_L, sheet_name)
+    formula_73 = safe_formula(generate_excel_formula, cos_nissan_uc,       column_index_New_P_L, sheet_name)
+    formula_74 = safe_formula(generate_excel_formula, vme_nissan_uc,       column_index_New_P_L, sheet_name)
+    formula_75 = safe_formula(generate_excel_formula, fmi_nissan_uc,       column_index_New_P_L, sheet_name)
+    formula_76 = safe_formula(generate_excel_formula, turnover_datsun_uc,  column_index_New_P_L, sheet_name)
+    formula_77 = safe_formula(generate_excel_formula, cos_datsun_uc,       column_index_New_P_L, sheet_name)
+    formula_78 = safe_formula(generate_excel_formula, vme_datsun_uc,       column_index_New_P_L, sheet_name)
+    formula_79 = safe_formula(generate_excel_formula, fmi_datsun_uc,       column_index_New_P_L, sheet_name)
+
+    formula_80 = safe_formula(generate_excel_formula, turnover_nissan_as,   column_index_New_P_L, sheet_name)
+    formula_81 = safe_formula(generate_excel_formula, cos_nissan_as,        column_index_New_P_L, sheet_name)
+    formula_82 = safe_formula(generate_excel_formula, vme_nissan_as,        column_index_New_P_L, sheet_name)
+    formula_83 = safe_formula(generate_excel_formula, fmi_nissan_as,        column_index_New_P_L, sheet_name)
+    formula_84 = safe_formula(generate_excel_formula, turnover_infiniti_as, column_index_New_P_L, sheet_name)
+    formula_85 = safe_formula(generate_excel_formula, cos_infiniti_as,      column_index_New_P_L, sheet_name)
+    formula_86 = safe_formula(generate_excel_formula, vme_infiniti_as,      column_index_New_P_L, sheet_name)
+    formula_87 = safe_formula(generate_excel_formula, fmi_infiniti_as,      column_index_New_P_L, sheet_name)
+    formula_88 = safe_formula(generate_excel_formula, turnover_datsun_as,   column_index_New_P_L, sheet_name)
+    formula_89 = safe_formula(generate_excel_formula, cos_datsun_as,        column_index_New_P_L, sheet_name)
+    formula_90 = safe_formula(generate_excel_formula, vme_datsun_as,        column_index_New_P_L, sheet_name)
+    formula_91 = safe_formula(generate_excel_formula, fmi_datsun_as,        column_index_New_P_L, sheet_name)
+
+    formula_92 = safe_formula(generate_excel_formula, turnover_nissan_export,   column_index_New_P_L, sheet_name)
+    formula_93 = safe_formula(generate_excel_formula, cos_nissan_export,        column_index_New_P_L, sheet_name)
+    formula_94 = safe_formula(generate_excel_formula, vme_nissan_export,        column_index_New_P_L, sheet_name)
+    formula_95 = safe_formula(generate_excel_formula, fmi_nissan_export,        column_index_New_P_L, sheet_name)
+    formula_96 = safe_formula(generate_excel_formula, turnover_infiniti_export, column_index_New_P_L, sheet_name)
+    formula_97 = safe_formula(generate_excel_formula, cos_infiniti_export,      column_index_New_P_L, sheet_name)
+    formula_98 = safe_formula(generate_excel_formula, vme_infiniti_export,      column_index_New_P_L, sheet_name)
+    formula_99 = safe_formula(generate_excel_formula, fmi_infiniti_export,      column_index_New_P_L, sheet_name)
+
+    formula_100 = safe_formula(generate_excel_formula, _idx(x83_sales_to_renault_row),                     column_index_New_P_L, sheet_name)
+    formula_101 = safe_formula(generate_excel_formula, _idx(f91r_sales_to_renault_trucks_row),             column_index_New_P_L, sheet_name)
+    formula_102 = safe_formula(generate_excel_formula, _idx(production_parts_sales_to_inter_companies_row),column_index_New_P_L, sheet_name)
+    formula_103 = safe_formula(generate_excel_formula, _idx(cantabria_sales_to_third_party_row),           column_index_New_P_L, sheet_name)
+    formula_104 = safe_formula(generate_excel_formula, _idx(parts_sales_to_renault_row),                   column_index_New_P_L, sheet_name)
+    formula_105 = safe_formula(generate_excel_formula, _idx(battery_plant_other_costs_row),                column_index_New_P_L, sheet_name)
+    formula_106 = safe_formula(generate_excel_formula, _idx(scraps_sales_row),                             column_index_New_P_L, sheet_name)
+    formula_107 = safe_formula(generate_excel_formula, _idx(pensions_row),                                 column_index_New_P_L, sheet_name)
+    formula_108 = safe_formula(generate_excel_formula, _idx(others_row),                                   column_index_New_P_L, sheet_name)
+
+    formula_109 = safe_formula(generate_excel_formula, _idx(materials_costs_row),                column_index_New_P_L, sheet_name)
+    formula_110 = safe_formula(generate_excel_formula, _idx(bo_cost_reduction_row),              column_index_New_P_L, sheet_name)
+    formula_111 = safe_formula(generate_excel_formula, _idx(renault_tp_row),                     column_index_New_P_L, sheet_name)
+    formula_112 = safe_formula(generate_excel_formula, _idx(intercompany_parts_kd_row),          column_index_New_P_L, sheet_name)
+    formula_113 = safe_formula(generate_excel_formula, _idx(inbound_freight_insurance_row),      column_index_New_P_L, sheet_name)
+    formula_114 = safe_formula(generate_excel_formula, _idx(inbound_duty_row),                   column_index_New_P_L, sheet_name)
+    formula_115 = safe_formula(generate_excel_formula, _idx(inhouse_direct_labour_row),          column_index_New_P_L, sheet_name)
+    formula_116 = safe_formula(generate_excel_formula, _idx(battery_nmuk_row),                   column_index_New_P_L, sheet_name)
+    formula_117 = safe_formula(generate_excel_formula, _idx(events_row),                         column_index_New_P_L, sheet_name)
+    formula_118 = safe_formula(generate_excel_formula, _idx(materials_costs_row),                column_index_New_P_L, sheet_name)
+    formula_119 = safe_formula(generate_excel_formula, _idx(other_adjustments_row_manu_1),       column_index_New_P_L, sheet_name)
+    formula_121 = safe_formula(generate_excel_formula, _idx(core_fixed_row),                     column_index_New_P_L, sheet_name)
+    formula_122 = safe_formula(generate_excel_formula, _idx(pic_nissan_row),                     column_index_New_P_L, sheet_name)
+    formula_123 = safe_formula(generate_excel_formula, _idx(regional_cost_row),                  column_index_New_P_L, sheet_name)
+    formula_124 = safe_formula(generate_excel_formula, _idx(vendor_tooling_depreciation_row),    column_index_New_P_L, sheet_name)
+    formula_125 = safe_formula(generate_excel_formula, _idx(projects_row),                       column_index_New_P_L, sheet_name)
+    formula_126 = safe_formula(generate_excel_formula, _idx(nesas_nisa_manufacturing_row),       column_index_New_P_L, sheet_name)
+    formula_127 = safe_formula(generate_excel_formula, _idx(battery_fixed_row),                  column_index_New_P_L, sheet_name)
+    formula_128 = safe_formula(generate_excel_formula, _idx(infiniti_fixed_cost_gd1a_row),       column_index_New_P_L, sheet_name)
+    formula_129 = safe_formula(generate_excel_formula, _idx(maintenance_of_existing_models_dd_row), column_index_New_P_L, sheet_name)
+    formula_130 = safe_formula(generate_excel_formula, _idx(gd1a_top_position_shift_to_icp_row), column_index_New_P_L, sheet_name)
+    formula_131 = safe_formula(generate_excel_formula, _idx(supplier_claims_other_row),          column_index_New_P_L, sheet_name)
+    formula_132 = safe_formula(generate_excel_formula, _idx(supplier_claims_other_row) + 1,      column_index_New_P_L, sheet_name)
+
+    ocs_base = ocs_row[0]
+    formula_133 = safe_formula(generate_excel_formula, ocs_base,      column_index_New_P_L, sheet_name)
+    formula_134 = safe_formula(generate_excel_formula, ocs_base + 1,  column_index_New_P_L, sheet_name)
+    formula_135 = safe_formula(generate_excel_formula, ocs_base + 2,  column_index_New_P_L, sheet_name)
+    formula_136 = safe_formula(generate_excel_formula, ocs_base + 3,  column_index_New_P_L, sheet_name)
+    formula_137 = safe_formula(generate_excel_formula, ocs_base + 4,  column_index_New_P_L, sheet_name)
+    formula_138 = safe_formula(generate_excel_formula, ocs_base + 5,  column_index_New_P_L, sheet_name)
+    formula_139 = safe_formula(generate_excel_formula, ocs_base + 6,  column_index_New_P_L, sheet_name)
+    formula_140 = safe_formula(generate_excel_formula, ocs_base + 7,  column_index_New_P_L, sheet_name)
+    formula_141 = safe_formula(generate_excel_formula, ocs_base + 8,  column_index_New_P_L, sheet_name)
+    formula_142 = safe_formula(generate_excel_formula, ocs_base + 9,  column_index_New_P_L, sheet_name)
+    formula_143 = safe_formula(generate_excel_formula, ocs_base + 10, column_index_New_P_L, sheet_name)
+    formula_144 = safe_formula(generate_excel_formula, ocs_base + 11, column_index_New_P_L, sheet_name)
+    formula_145 = safe_formula(generate_excel_formula, ocs_base + 12, column_index_New_P_L, sheet_name)
+    formula_146 = safe_formula(generate_excel_formula, ocs_base + 13, column_index_New_P_L, sheet_name)
+    formula_147 = safe_formula(generate_excel_formula, ocs_base + 14, column_index_New_P_L, sheet_name)
+    formula_148 = safe_formula(generate_excel_formula, ocs_base + 15, column_index_New_P_L, sheet_name)
+    formula_149 = safe_formula(generate_excel_formula, ocs_base + 16, column_index_New_P_L, sheet_name)
+    formula_150 = safe_formula(generate_excel_formula, ocs_base + 17, column_index_New_P_L, sheet_name)
+    formula_151 = safe_formula(generate_excel_formula, ocs_base + 18, column_index_New_P_L, sheet_name)
+    formula_152 = safe_formula(generate_excel_formula, ocs_base + 19, column_index_New_P_L, sheet_name)
+    formula_153 = safe_formula(generate_excel_formula, ocs_base + 20, column_index_New_P_L, sheet_name)
+    formula_154 = safe_formula(generate_excel_formula, ocs_base + 21, column_index_New_P_L, sheet_name)
+    formula_155 = safe_formula(generate_excel_formula, ocs_base + 22, column_index_New_P_L, sheet_name)
+    formula_156 = safe_formula(generate_excel_formula, ocs_base + 23, column_index_New_P_L, sheet_name)
+    formula_157 = safe_formula(generate_excel_formula, ocs_base + 24, column_index_New_P_L, sheet_name)
+    formula_158 = safe_formula(generate_excel_formula, ocs_base + 25, column_index_New_P_L, sheet_name)
+    formula_159 = safe_formula(generate_excel_formula, ocs_base + 26, column_index_New_P_L, sheet_name)
+    formula_160 = safe_formula(generate_excel_formula, ocs_base + 27, column_index_New_P_L, sheet_name)
+    formula_161 = safe_formula(generate_excel_formula, ocs_base + 28, column_index_New_P_L, sheet_name)
+    formula_162 = safe_formula(generate_excel_formula, ocs_base + 29, column_index_New_P_L, sheet_name)
+    formula_163 = safe_formula(generate_excel_formula, ocs_base + 30, column_index_New_P_L, sheet_name)
+    formula_164 = safe_formula(generate_excel_formula, ocs_base + 31, column_index_New_P_L, sheet_name)
+    formula_165 = safe_formula(generate_excel_formula, ocs_base + 32, column_index_New_P_L, sheet_name)
+    formula_166 = safe_formula(generate_excel_formula, ocs_base + 33, column_index_New_P_L, sheet_name)
+    formula_167 = safe_formula(generate_excel_formula, ocs_base + 34, column_index_New_P_L, sheet_name)
+    formula_168 = safe_formula(generate_excel_formula, ocs_base + 35, column_index_New_P_L, sheet_name)
+    formula_169 = safe_formula(generate_excel_formula, ocs_base + 36, column_index_New_P_L, sheet_name)
+
+    # OEM formulas
+    formula_171 = safe_formula(generate_excel_formula, turnover_index[0],  column_index_New_P_L, sheet_name)
+    formula_172 = safe_formula(generate_excel_formula, standard_index[0],  column_index_New_P_L, sheet_name)
+    formula_173 = safe_formula(generate_excel_formula, marginal_index[0],  column_index_New_P_L, sheet_name)
+    formula_174 = safe_formula(generate_excel_formula, vehicle_index[0],   column_index_New_P_L, sheet_name)
+    formula_175 = safe_formula(generate_excel_formula, logistics_index[0], column_index_New_P_L, sheet_name)
+    formula_176 = safe_formula(generate_excel_formula, royalty_index[0],   column_index_New_P_L, sheet_name)
+    formula_177 = safe_formula(generate_excel_formula, others_index[0],    column_index_New_P_L, sheet_name)
+    formula_178 = safe_formula(generate_excel_formula, EOP_index[0],       column_index_New_P_L, sheet_name)
+    summation_formula_2 = f"{formula_172} + {formula_177[1:]}"
+
+    formula_179 = safe_formula(generate_excel_formula, turnover_index[1],  column_index_New_P_L, sheet_name)
+    formula_180 = safe_formula(generate_excel_formula, standard_index[1],  column_index_New_P_L, sheet_name)
+    formula_181 = safe_formula(generate_excel_formula, marginal_index[1],  column_index_New_P_L, sheet_name)
+    formula_182 = safe_formula(generate_excel_formula, vehicle_index[1],   column_index_New_P_L, sheet_name)
+    formula_183 = safe_formula(generate_excel_formula, logistics_index[1], column_index_New_P_L, sheet_name)
+    formula_184 = safe_formula(generate_excel_formula, royalty_index[1],   column_index_New_P_L, sheet_name)
+    formula_185 = safe_formula(generate_excel_formula, others_index[1],    column_index_New_P_L, sheet_name)
+    formula_186 = safe_formula(generate_excel_formula, EOP_index[1],       column_index_New_P_L, sheet_name)
+    summation_formula_3 = f"{formula_180} + {formula_185[1:]}"
+
+    formula_187 = safe_formula(generate_excel_formula, turnover_index[2],  column_index_New_P_L, sheet_name)
+    formula_188 = safe_formula(generate_excel_formula, standard_index[2],  column_index_New_P_L, sheet_name)
+    formula_189 = safe_formula(generate_excel_formula, marginal_index[2],  column_index_New_P_L, sheet_name)
+    formula_190 = safe_formula(generate_excel_formula, vehicle_index[2],   column_index_New_P_L, sheet_name)
+    formula_191 = safe_formula(generate_excel_formula, logistics_index[2], column_index_New_P_L, sheet_name)
+    formula_192 = safe_formula(generate_excel_formula, royalty_index[2],   column_index_New_P_L, sheet_name)
+    formula_193 = safe_formula(generate_excel_formula, others_index[2],    column_index_New_P_L, sheet_name)
+    formula_194 = safe_formula(generate_excel_formula, EOP_index[2],       column_index_New_P_L, sheet_name)
+    summation_formula_4 = f"{formula_188} + {formula_193[1:]}"
+
+    formula_195 = safe_formula(generate_excel_formula, _idx(functional_r_d_row),     column_index_New_P_L, sheet_name)
+    formula_196 = safe_formula(generate_excel_formula, _idx(non_functional_r_d_row), column_index_New_P_L, sheet_name)
+
+    formula_197 = safe_formula(generate_excel_formula, labour_costs_row[0],       column_index_New_P_L, sheet_name)
+    formula_198 = safe_formula(generate_excel_formula, IS_Costs_row[0],           column_index_New_P_L, sheet_name)
+    formula_199 = safe_formula(generate_excel_formula, Deprecation_row[0],        column_index_New_P_L, sheet_name)
+    formula_200 = safe_formula(generate_excel_formula, provision_for_doutful_row[0], column_index_New_P_L, sheet_name)
+    formula_201 = safe_formula(generate_excel_formula, Overhead_row[0],           column_index_New_P_L, sheet_name)
+    formula_202 = safe_formula(generate_excel_formula, labour_costs_row[1],       column_index_New_P_L, sheet_name)
+    formula_203 = safe_formula(generate_excel_formula, IS_Costs_row[1],           column_index_New_P_L, sheet_name)
+    formula_204 = safe_formula(generate_excel_formula, Deprecation_row[1],        column_index_New_P_L, sheet_name)
+    formula_205 = safe_formula(generate_excel_formula, provision_for_doutful_row[1], column_index_New_P_L, sheet_name)
+    formula_206 = safe_formula(generate_excel_formula, Overhead_row[1],           column_index_New_P_L, sheet_name)
+    formula_207 = safe_formula(generate_excel_formula, labour_costs_row[2],       column_index_New_P_L, sheet_name)
+    formula_208 = safe_formula(generate_excel_formula, IS_Costs_row[2],           column_index_New_P_L, sheet_name)
+    formula_209 = safe_formula(generate_excel_formula, Deprecation_row[2],        column_index_New_P_L, sheet_name)
+    formula_210 = safe_formula(generate_excel_formula, provision_for_doutful_row[2], column_index_New_P_L, sheet_name)
+    formula_211 = safe_formula(generate_excel_formula, Overhead_row[2],           column_index_New_P_L, sheet_name)
+
+    formula_212 = safe_formula(generate_excel_formula, _idx(other_adjustments_row_manu_1), column_index_New_P_L, sheet_name)
+    formula_213 = safe_formula(generate_excel_formula, _idx(others_row_manu_1),            column_index_New_P_L, sheet_name)
+    summation_formula_1 = f"{formula_212} + {formula_213[1:]}"
+
+    # R&D formulas
+    sheet_name = 'R&D'
+    formula_214 = safe_formula(generate_excel_formula, _idx(functional_r_and_d_revenue),     column_index_r_and_d, sheet_name)
+    formula_215 = safe_formula(generate_excel_formula, _idx(functional_r_and_d_cost),        column_index_r_and_d, sheet_name)
+    formula_216 = safe_formula(generate_excel_formula, _idx(non_functional_r_and_d_revenue), column_index_r_and_d, sheet_name)
+    formula_217 = safe_formula(generate_excel_formula, _idx(non_functional_r_and_d_cost),    column_index_r_and_d, sheet_name)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  KPI FORMULAS
+    # ─────────────────────────────────────────────────────────────────────────
+
+    sheet_name = 'Relief'
+    formula_KPI_1     = safe_formula(generate_excel_formula, safe_row(mz_impairment_row2),      column_index_P_L_Relief, sheet_name)
+    formula_KPI_2     = safe_formula(generate_excel_formula, safe_row(g_a_impairment_row2),     column_index_P_L_Relief, sheet_name)
+    sheet_name = 'Reclass'
+    formula_KPI_3     = safe_formula(generate_excel_formula, safe_row(reclass_var_row),         column_index_reclass, sheet_name)
+    summation_formula_KPI_1 = f"{formula_KPI_2} + {formula_KPI_3[1:]}"
+    sheet_name = 'Relief'
+    formula_KPI_4     = safe_formula(generate_excel_formula, safe_row(iln_export_nmuk_row2),    column_index_P_L_Relief, sheet_name)
+    formula_KPI_4_1   = safe_formula(generate_excel_formula, safe_row(iln_export_nmuk_row2) + 1,column_index_P_L_Relief, sheet_name)
+    formula_KPI_5     = safe_formula(generate_excel_formula, safe_row(itp_cbu_infiniti_row2),   column_index_P_L_Relief, sheet_name)
+    summation_formula_KPI_2 = f"{formula_KPI_4} + {formula_KPI_4_1[1:]}"
+    formula_KPI_6     = safe_formula(generate_excel_formula, safe_row(error_correction_in_mz_row2), column_index_P_L_Relief, sheet_name)
+    formula_KPI_7     = safe_formula(generate_excel_formula, safe_row(kd_itp_nmuk_row1),        column_index_P_L_Relief, sheet_name)
+    formula_KPI_8     = safe_formula(generate_excel_formula, safe_row(kd_itp_nmgr_row2),        column_index_P_L_Relief, sheet_name)
+    formula_KPI_9     = safe_formula(generate_excel_formula, safe_row(kd_itp_nmisa_row2),       column_index_P_L_Relief, sheet_name)
+    formula_KPI_10    = safe_formula(generate_excel_formula, safe_row(battery_kw_itp_nmuk),     column_index_P_L_Relief, sheet_name)
+    formula_KPI_11    = safe_formula(generate_excel_formula, safe_row(battery_kw_itp_nmisa),    column_index_P_L_Relief, sheet_name)
+    summation_formula_KPI_3 = f"{formula_KPI_7} + {formula_KPI_8[1:]} + {formula_KPI_9[1:]}+{formula_KPI_10[1:]}+{formula_KPI_11[1:]}"
+    formula_KPI_111   = safe_formula(generate_excel_formula, safe_row(g_a_impairment_row2) + 1, column_index_P_L_Relief, sheet_name)
+    formula_KPI_12    = safe_formula(generate_excel_formula, safe_row(compact_ev_vt_impairment), column_index_P_L_Relief, sheet_name)
+    formula_KPI_13    = safe_formula(generate_excel_formula, safe_row(itp_cbu_nissan_row2),     column_index_P_L_Relief, sheet_name)
+    formula_KPI_14    = safe_formula(generate_excel_formula, safe_row(battery_cancelation_row), column_index_P_L_Relief, sheet_name)
+    formula_KPI_15    = safe_formula(generate_excel_formula, safe_row(error_correction_in_mz_row), column_index_P_L_Relief, sheet_name)
+    formula_KPI_16    = safe_formula(generate_excel_formula, safe_row(top_daimler_correction_row), column_index_P_L_Relief, sheet_name)
+    formula_KPI_17    = safe_formula(generate_excel_formula, safe_row(infiniti_fmi_correction_row), column_index_P_L_Relief, sheet_name)
+    formula_KPI_18    = safe_formula(generate_excel_formula, safe_row(recall_service_campaigns_row1), column_index_P_L_Relief, sheet_name)
+    formula_KPI_conn_18 = safe_formula(generate_excel_formula, safe_row(connectivity_row2),   column_index_P_L_Relief, sheet_name)
+    summation_formula_KPI_4 = f"{formula_KPI_conn_18} + {formula_KPI_13[1:]}"
+    summation_formula_KPI_5 = f"{formula_KPI_14} + {formula_KPI_15[1:]}+{formula_KPI_16[1:]}+{formula_KPI_17[1:]}"
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  UED FORMULA
+    # ─────────────────────────────────────────────────────────────────────────
+
+    sheet_name = 'P&L Actual'
+    print(file_path_Template)
+    Formula_UED_1 = safe_extract(file_path_Template_man, sheet_name, 340, column_index_New_P_L_1)
+    print("column", column_index_New_P_L)
+
+    formula_sum_UED = f"=({formula_result_ued[1:]}-{Formula_UED_1[1:]})/1000"
+    print("formula5", formula_5)
+    print(formula_sum_UED)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  FINAL column_index_New_P_L ADJUST  (same as original)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    sheet_names = ['Reclass', 'Relief', 'HQ Tagetik', 'P&L Actual', 'New KPI Actual']
+    column_index_New_P_L = column_index_New_P_L_1 + 1
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  CELL UPDATES  (identical structure to original)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    cell_updates = [
+        # ── Reclass ──────────────────────────────────────────────────────────
+        [
+            (reclass_var_row - 2, column_index_reclass + 1, Var_Converter),
+            (reclass_var_row + 1, column_index_reclass + 1, var_converter_bJPY),
+            (reclass_var_row + 2, column_index_reclass + 1, var_converter_mEUR),
+        ],
+        # ── Relief ───────────────────────────────────────────────────────────
+        [
+            (78, column_index_P_L_Relief + 1, ePWR_var),
+            (75, column_index_P_L_Relief + 1, formula_relief_1),
+            (80, column_index_P_L_Relief + 1, formula_relief_2),
+            (81, column_index_P_L_Relief + 1, formula_relief_3),
+            (82, column_index_P_L_Relief + 1, formula_relief_4),
+            (83, column_index_P_L_Relief + 1, formula_relief_5),
+            (84, column_index_P_L_Relief + 1, formula_relief_6),
+            (87, column_index_P_L_Relief + 1, formula_relief_12),
+            (95, column_index_P_L_Relief + 1, formula_relief_9),
+            (96, column_index_P_L_Relief + 1, formula_relief_10),
+        ],
+        # ── HQ Tagetik ───────────────────────────────────────────────────────
+        [
+            (9,  column_index_hq_tgt + 1, formula_hq_tdk_3),
+            (10, column_index_hq_tgt + 1, formula_hq_tdk_4),
+            (11, column_index_hq_tgt + 1, formula_hq_tdk_5),
+            (12, column_index_hq_tgt + 1, formula_hq_tdk_6),
+            (13, column_index_hq_tgt + 1, formula_hq_tdk_7),
+            (14, column_index_hq_tgt + 1, formula_hq_tdk_8),
+            (15, column_index_hq_tgt + 1, formula_hq_tdk_9),
+            (16, column_index_hq_tgt + 1, formula_hq_tdk_10),
+            (17, column_index_hq_tgt + 1, formula_hq_tdk_11),
+            (18, column_index_hq_tgt + 1, formula_hq_tdk_12),
+            (19, column_index_hq_tgt + 1, formula_hq_tdk_13),
+            (20, column_index_hq_tgt + 1, formula_hq_tdk_14),
+            (21, column_index_hq_tgt + 1, formula_hq_tdk_15),
+            (22, column_index_hq_tgt + 1, formula_hq_tdk_16),
+            (23, column_index_hq_tgt + 1, formula_hq_tdk_17),
+            (24, column_index_hq_tgt + 1, formula_hq_tdk_18),
+            (25, column_index_hq_tgt + 1, formula_hq_tdk_19),
+            (26, column_index_hq_tgt + 1, formula_hq_tdk_20),
+            (27, column_index_hq_tgt + 1, formula_hq_tdk_21),
+            (28, column_index_hq_tgt + 1, formula_hq_tdk_22),
+            (29, column_index_hq_tgt + 1, formula_hq_tdk_23),
+            (30, column_index_hq_tgt + 1, formula_hq_tdk_24),
+            (31, column_index_hq_tgt + 1, formula_hq_tdk_25),
+            (32, column_index_hq_tgt + 1, formula_hq_tdk_26),
+            (33, column_index_hq_tgt + 1, formula_hq_tdk_27),
+            (34, column_index_hq_tgt + 1, formula_hq_tdk_28),
+            (35, column_index_hq_tgt + 1, formula_hq_tdk_29),
+            (36, column_index_hq_tgt + 1, formula_hq_tdk_30),
+            (37, column_index_hq_tgt + 1, formula_hq_tdk_31),
+            (38, column_index_hq_tgt + 1, formula_hq_tdk_32),
+            (39, column_index_hq_tgt + 1, formula_hq_tdk_33),
+            (40, column_index_hq_tgt + 1, formula_hq_tdk_34),
+            (41, column_index_hq_tgt + 1, formula_hq_tdk_35),
+            (42, column_index_hq_tgt + 1, formula_hq_tdk_36),
+            (43, column_index_hq_tgt + 1, formula_hq_tdk_37),
+            (44, column_index_hq_tgt + 1, formula_hq_tdk_38),
+            (46, column_index_hq_tgt + 1, hq_formula_ex_1),
+            (47, column_index_hq_tgt + 1, hq_formula_ex_2),
+            (48, column_index_hq_tgt + 1, hq_formula_ex_3),
+            (49, column_index_hq_tgt + 1, hq_formula_ex_4),
+            (52, column_index_hq_tgt + 1, formula_hq_tagetik_1),
+            (54, column_index_hq_tgt + 1, formula_hq_tagetik_2),
+            (67, column_index_hq_tgt + 1, formula_hq_tagetik_6),
+            (69, column_index_hq_tgt + 1, cafe_penalty_var),
+        ],
+        # ── P&L Actual ───────────────────────────────────────────────────────
+        [
+            (5,  column_index_New_P_L, formula_5),
+            (6,  column_index_New_P_L, formula_6),
+            (7,  column_index_New_P_L, formula_7),
+            (9,  column_index_New_P_L, formula_9),
+            (10, column_index_New_P_L, formula_10),
+            (11, column_index_New_P_L, formula_11),
+            (12, column_index_New_P_L, formula_12),
+            (14, column_index_New_P_L, formula_13),
+            (15, column_index_New_P_L, formula_14),
+            (16, column_index_New_P_L, formula_15),
+            (17, column_index_New_P_L, formula_16),
+            (19, column_index_New_P_L, formula_17),
+            (20, column_index_New_P_L, formula_18),
+            (21, column_index_New_P_L, formula_19),
+            (22, column_index_New_P_L, formula_20),
+            (23, column_index_New_P_L, formula_21),
+            (25, column_index_New_P_L, formula_22),
+            (26, column_index_New_P_L, formula_23),
+            (29, column_index_New_P_L, formula_24),
+            (30, column_index_New_P_L, formula_25),
+            (31, column_index_New_P_L, formula_26),
+            (32, column_index_New_P_L, formula_27),
+            (34, column_index_New_P_L, formula_28),
+            (36, column_index_New_P_L, formula_29),
+            (37, column_index_New_P_L, formula_30),
+            (10, 20, formula_new_100),
+            (11, 20, formula_new_101),
+            (12, 20, formula_new_102),
+            (39, column_index_New_P_L, formula_39),
+            (40, column_index_New_P_L, formula_40),
+            (42, column_index_New_P_L, formula_41),
+            (43, column_index_New_P_L, formula_42),
+            (45, column_index_New_P_L, formula_43),
+            (46, column_index_New_P_L, formula_44),
+            (48, column_index_New_P_L, formula_45),
+            (49, column_index_New_P_L, formula_46),
+            (52, column_index_New_P_L, formula_47),
+            (53, column_index_New_P_L, formula_48),
+            (54, column_index_New_P_L, formula_49),
+            (57, column_index_New_P_L, formula_50),
+            (58, column_index_New_P_L, formula_51),
+            (60, column_index_New_P_L, formula_52),
+            (61, column_index_New_P_L, formula_53),
+            (62, column_index_New_P_L, formula_54),
+            (63, column_index_New_P_L, formula_55),
+            (64, column_index_New_P_L, formula_56),
+            (65, column_index_New_P_L, formula_57),
+            (66, column_index_New_P_L, formula_58),
+            (69, column_index_New_P_L, formula_59),
+            (73, column_index_New_P_L, formula_60),
+            (74, column_index_New_P_L, formula_61),
+            (76, column_index_New_P_L, formula_62),
+            (78, column_index_New_P_L, formula_63),
+            (81, column_index_New_P_L, formula_68),
+            (82, column_index_New_P_L, formula_69),
+            (84, column_index_New_P_L, formula_70),
+            (86, column_index_New_P_L, formula_71),
+            (89, column_index_New_P_L, formula_64),
+            (90, column_index_New_P_L, formula_65),
+            (92, column_index_New_P_L, formula_66),
+            (94, column_index_New_P_L, formula_67),
+            (105, column_index_New_P_L, formula_72),
+            (106, column_index_New_P_L, formula_73),
+            (108, column_index_New_P_L, formula_74),
+            (110, column_index_New_P_L, formula_75),
+            (113, column_index_New_P_L, formula_76),
+            (114, column_index_New_P_L, formula_77),
+            (116, column_index_New_P_L, formula_78),
+            (118, column_index_New_P_L, formula_79),
+            (137, column_index_New_P_L, formula_80),
+            (138, column_index_New_P_L, formula_81),
+            (140, column_index_New_P_L, formula_82),
+            (142, column_index_New_P_L, formula_83),
+            (145, column_index_New_P_L, formula_84),
+            (146, column_index_New_P_L, formula_85),
+            (148, column_index_New_P_L, formula_86),
+            (150, column_index_New_P_L, formula_87),
+            (153, column_index_New_P_L, formula_88),
+            (154, column_index_New_P_L, formula_89),
+            (156, column_index_New_P_L, formula_90),
+            (158, column_index_New_P_L, formula_91),
+            (171, column_index_New_P_L, formula_92),
+            (172, column_index_New_P_L, formula_93),
+            (174, column_index_New_P_L, formula_94),
+            (178, column_index_New_P_L, formula_96),
+            (179, column_index_New_P_L, formula_97),
+            (181, column_index_New_P_L, formula_98),
+            (183, column_index_New_P_L, formula_99),
+            (193, column_index_New_P_L, formula_100),
+            (194, column_index_New_P_L, formula_101),
+            (195, column_index_New_P_L, formula_102),
+            (196, column_index_New_P_L, formula_103),
+            (197, column_index_New_P_L, formula_104),
+            (198, column_index_New_P_L, formula_105),
+            (199, column_index_New_P_L, formula_106),
+            (200, column_index_New_P_L, formula_107),
+            (203, column_index_New_P_L, formula_108),
+            (206, column_index_New_P_L, formula_109),
+            (207, column_index_New_P_L, formula_110),
+            (208, column_index_New_P_L, formula_111),
+            (209, column_index_New_P_L, formula_112),
+            (210, column_index_New_P_L, formula_113),
+            (211, column_index_New_P_L, formula_114),
+            (212, column_index_New_P_L, formula_115),
+            (213, column_index_New_P_L, formula_116),
+            (217, column_index_New_P_L, summation_formula_1),
+            (219, column_index_New_P_L, formula_121),
+            (220, column_index_New_P_L, formula_122),
+            (221, column_index_New_P_L, formula_123),
+            (222, column_index_New_P_L, formula_124),
+            (223, column_index_New_P_L, formula_125),
+            (224, column_index_New_P_L, formula_126),
+            (225, column_index_New_P_L, formula_127),
+            (226, column_index_New_P_L, formula_128),
+            (227, column_index_New_P_L, formula_129),
+            (228, column_index_New_P_L, formula_130),
+            (229, column_index_New_P_L, formula_131),
+            (230, column_index_New_P_L, formula_132),
+            (235, column_index_New_P_L, formula_133),
+            (236, column_index_New_P_L, formula_134),
+            (237, column_index_New_P_L, formula_135),
+            (238, column_index_New_P_L, formula_136),
+            (239, column_index_New_P_L, formula_137),
+            (241, column_index_New_P_L, formula_139),
+            (242, column_index_New_P_L, formula_140),
+            (243, column_index_New_P_L, formula_141),
+            (244, column_index_New_P_L, formula_142),
+            (245, column_index_New_P_L, formula_143),
+            (247, column_index_New_P_L, formula_145),
+            (248, column_index_New_P_L, formula_146),
+            (249, column_index_New_P_L, formula_147),
+            (250, column_index_New_P_L, formula_148),
+            (251, column_index_New_P_L, formula_149),
+            (253, column_index_New_P_L, formula_151),
+            (254, column_index_New_P_L, formula_152),
+            (255, column_index_New_P_L, formula_153),
+            (256, column_index_New_P_L, formula_154),
+            (257, column_index_New_P_L, formula_155),
+            (261, column_index_New_P_L, formula_159),
+            (262, column_index_New_P_L, formula_160),
+            (263, column_index_New_P_L, formula_161),
+            (265, column_index_New_P_L, formula_162),
+            (266, column_index_New_P_L, formula_163),
+            (268, column_index_New_P_L, formula_165),
+            (269, column_index_New_P_L, formula_166),
+            (270, column_index_New_P_L, formula_167),
+            (275, column_index_New_P_L, formula_171),
+            (276, column_index_New_P_L, summation_formula_2),
+            (277, column_index_New_P_L, formula_173),
+            (278, column_index_New_P_L, formula_174),
+            (279, column_index_New_P_L, formula_175),
+            (280, column_index_New_P_L, formula_176),
+            (282, column_index_New_P_L, formula_179),
+            (283, column_index_New_P_L, summation_formula_3),
+            (284, column_index_New_P_L, formula_181),
+            (285, column_index_New_P_L, formula_182),
+            (286, column_index_New_P_L, formula_183),
+            (287, column_index_New_P_L, formula_184),
+            (289, column_index_New_P_L, formula_187),
+            (290, column_index_New_P_L, summation_formula_4),
+            (291, column_index_New_P_L, formula_189),
+            (292, column_index_New_P_L, formula_190),
+            (293, column_index_New_P_L, formula_191),
+            (294, column_index_New_P_L, formula_192),
+            (304, column_index_New_P_L, formula_195),
+            (305, column_index_New_P_L, formula_196),
+            (307, column_index_New_P_L, formula_214),
+            (308, column_index_New_P_L, formula_215),
+            (309, column_index_New_P_L, formula_216),
+            (310, column_index_New_P_L, formula_217),
+            (313, column_index_New_P_L, formula_197),
+            (314, column_index_New_P_L, formula_198),
+            (315, column_index_New_P_L, formula_199),
+            (316, column_index_New_P_L, formula_200),
+            (317, column_index_New_P_L, formula_201),
+            (319, column_index_New_P_L, formula_202),
+            (320, column_index_New_P_L, formula_203),
+            (321, column_index_New_P_L, formula_204),
+            (322, column_index_New_P_L, formula_205),
+            (323, column_index_New_P_L, formula_206),
+            (325, column_index_New_P_L, formula_207),
+            (326, column_index_New_P_L, formula_208),
+            (327, column_index_New_P_L, formula_209),
+            (328, column_index_New_P_L, formula_210),
+            (329, column_index_New_P_L, formula_211),
+            (338, column_index_New_P_L, formula_hq_sum),
+            (339, column_index_New_P_L, formula_hq_tax_sum),
+            (340, column_index_New_P_L, formula_sum_UED),
+        ],
+        # ── New KPI Actual ───────────────────────────────────────────────────
+        [
+            (42,  P_L_New_KPI_index, formula_KPI_1),
+            (45,  P_L_New_KPI_index, summation_formula_KPI_1),
+            (205, P_L_New_KPI_index, formula_mccp_1),
+            (239, P_L_New_KPI_index, formula_OSP_ex_sum),
+            (249, P_L_New_KPI_index, formula_ex_sum_249),
+            (263, P_L_New_KPI_index, formula_OSP_2),
+            (319, P_L_New_KPI_index, formula_mccp_2),
+            (382, P_L_New_KPI_index, summation_formula_KPI_2),
+            (383, P_L_New_KPI_index, formula_KPI_6),
+            (384, P_L_New_KPI_index, summation_formula_KPI_3),
+            (387, P_L_New_KPI_index, formula_KPI_111),
+            (390, P_L_New_KPI_index, formula_KPI_12),
+            (391, P_L_New_KPI_index, summation_formula_KPI_4),
+            (394, P_L_New_KPI_index, summation_formula_KPI_5),
+            (402, P_L_New_KPI_index, formula_KPI_5),
+            (421, P_L_New_KPI_index, formula_KPI_18),
+            (482, P_L_New_KPI_index, formula_sum_ocp_1),
+            (500, P_L_New_KPI_index, formula_sum_ocp_2),
+            (532, P_L_New_KPI_index, formula_ocp_tgk_1),
+            (533, P_L_New_KPI_index, formula_ocp_tgk_2),
+            (534, P_L_New_KPI_index, formula_ocp_tgk_3),
+        ],
+    ]
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  WRITE OUTPUT  (unchanged)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    file_path_P_L_1, result = paste_values_KPI_PL(
+        file_path_Template, sheet_names, cell_updates, month_number, output_path
+    )
+    print("Processed File1")
+
+    ACT(
+        file_path_P_L, file_path_P_L_1,
+        df_P_L_ROP_NE, df_P_L_HQ,
+        file_path_OSP, df_OSP,
+        file_path_HMF, df_HMF_Managerial,
+        file_path_New_KPI, df_P_L_New_KPI,
+        file_HQ_Item, df_hQ_items,
+        file_goodwill,
+        df_r_and_d,
+        df_MZ_conso,
+        df_P_L_Relief,
+        df_P_L_PL,
+        df_P_L_Reclass,
+        df_P_L_MCCP,
+        df_P_L_OCS,
+        df_New_KPI_CFMI,
+        df_New_goodwill, df_Act, df_1c_osp,
+        file_paths_High_Level_Variance, df_high_variance_feuil,
+        file_paths_Relief_KD, df_Relief_KD,
+        file_paths_Purchase_Price, df_Purchase_Price,
+        file_paths_UP_Calc_Template_Simulation, df_UP_Calc_Template_Simulation,
+        file_paths_NANO_HFM, df_nano_hfm,
+        file_paths_ITP, df_itp,
+        file_path_Template, file_path_Template_1,
+        month_number, Var_Converter, var_Cfmi,
+        file_path_Template_man_1, file_path_goodwill_template,
+        result, output_path
+    )
