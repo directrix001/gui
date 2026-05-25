@@ -5,3 +5,8 @@ def _safe_find_fmi_nv(df, name):
         logger.warning(f"find_fmi_row_nv({name}): {e}")
         z_audit.record("EXCEPTION", str(e), f"find_fmi_row_nv({name})")
         return (0,)*16
+    (fmi_nis_nv, trn_nis_nv, cos_nis_nv, vme_nis_nv,
+     fmi_dat_nv, trn_dat_nv, cos_dat_nv, vme_dat_nv,
+     fmi_inf_nv, trn_inf_nv, cos_inf_nv, vme_inf_nv,
+     fmi_tot_nv, trn_tot_nv, cos_tot_nv, vme_tot_nv,
+     ) = _safe_find_fmi_nv(df_P_L_ROP_NE, "df_P_L_ROP_NE") if HAS_ROP_NE else (0,)*16
