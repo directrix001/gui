@@ -1,16 +1,7 @@
-def find_fmi_row_nv(df: pd.DataFrame, fallback_rows: tuple | None = None):
-    starts = _brand_starts(df, "nissan nv", "datsun nv", "infiniti nv", "total nv")
-    rows = [_find_fmi_indices(df, s) for s in starts]
-    
-    if any(r is None for r in rows):
-        if fallback_rows is not None:
-            return fallback_rows
-        raise ValueError("FMI indices incomplete for NV section.")
-    
-    return tuple(v for r in rows for v in r)
-Usage:
-python# Normal usage - auto-detection
-result = find_fmi_row_nv(df)
-
-# With hardcoded fallback if detection fails
-result = find_fmi_row_nv(df, fallback_rows=(10, 11, 12, 13))
+def _safe_find_fmi_nv(df, name):
+    if not _df_ok(df, name): return (0,)*16
+    try:    return tuple(_int(x, f"fmi_nv({name})") for x in find_fmi_row_nv(df, fallback_rows=(73, 81, 89, 97)) )
+    except Exception as e:
+        logger.warning(f"find_fmi_row_nv({name}): {e}")
+        z_audit.record("EXCEPTION", str(e), f"find_fmi_row_nv({name})")
+        return (0,)*16
