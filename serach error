@@ -1,12 +1,198 @@
-    tax_list = _safe_tax(df_P_L_HQ, "df_P_L_HQ") if HAS_HQ else [0]
-    op_list  = _safe_op (df_P_L_HQ, "df_P_L_HQ") if HAS_HQ else [0]
-    tax_base = _int(tax_list[0]) if tax_list else 0
-    op_base  = _int(op_list[0])  if op_list  else 0
-
-def _safe_tax(df, name):
-    if not _df_ok(df, name): return [0]
-    try:    return _int_list(tax_and_public(df) or [0], f"tax_and_public({name})")
-    except Exception as e:
-        logger.warning(f"tax_and_public({name}): {e}")
-        z_audit.record("EXCEPTION", str(e), f"tax_and_public({name})")
-        return [0]
+He doesn't have any access. He just only do the uploads.
+CC
+ 
+Clark, Chris
+0 minutes 6 seconds0:06
+Clark, Chris 0 minutes 6 seconds
+And that's, but that's the point. That's the point. Anybody can access that really without any real permissions and anybody can run them jobs. Yeah.
+TB
+ 
+T R, Balaji
+0 minutes 13 seconds0:13
+T R, Balaji 0 minutes 13 seconds
+Yeah, no, no, this, no, no, this, this will be, this is I said prototype, this will be coming at the access only and we are going to deploy Nissan infrastructure only, right? So only this few people who are kind of adminers give the access, they only have this access to this tool. No, no, nobody else having access to this tool.
+CC
+ 
+Clark, Chris
+0 minutes 32 seconds0:32
+Clark, Chris 0 minutes 32 seconds
+But how do you do, how do you control that though? Because if you put on the Genpack desktop, it's everybody on the Genpack desktop gets it. How do you manage who has control access to it?
+TB
+ 
+T R, Balaji
+0 minutes 39 seconds0:39
+T R, Balaji 0 minutes 39 seconds
+No, no, it shouldn't be in the Genpact desktop. This is a prototype that we want to show you. It will develop in the infrastructure which you suggested, not like we will have a different server on for HRO. So we will.
+CC
+ 
+Clark, Chris
+0 minutes 54 seconds0:54
+Clark, Chris 0 minutes 54 seconds
+Yeah, so...
+Clark, Chris 0 minutes 56 seconds
+So that's an application. You want to deploy that as an application.
+TB
+ 
+T R, Balaji
+1 minute 1 second1:01
+T R, Balaji 1 minute 1 second
+Yes.
+CC
+ 
+Clark, Chris
+1 minute 1 second1:01
+Clark, Chris 1 minute 1 second
+That's, you know, yeah, which, yeah, which is a total different discussion again, because obviously we've got application standards, development standards, which have to be followed. And again, you know, you've got, as I said, security measures and all sorts of things on there that have to be reviewed. This wouldn't meet that criteria.
+MS
+ 
+Makker, Sakshi
+1 minute 1 second1:01
+Makker, Sakshi 1 minute 1 second
+Correct, yeah.
+MS
+Makker, Sakshi
+17 minutes 23 seconds17:23
+Makker, Sakshi 17 minutes 23 seconds
+So, of course.
+Makker, Sakshi 17 minutes 25 seconds
+Hmm.
+Makker, Sakshi 17 minutes 28 seconds
+Mm.
+Makker, Sakshi 17 minutes 31 seconds
+M.
+NR
+Northage, Rebecca
+17 minutes 32 seconds17:32
+Northage, Rebecca 17 minutes 32 seconds
+With these Python scripts, we need to be following this process and I have sent it to them and I had a call with them.
+MS
+Makker, Sakshi
+17 minutes 37 seconds17:37
+Makker, Sakshi 17 minutes 37 seconds
+And, and is this is this a one time this thing, Rebecca, or is this like, you know, for every project there'll be a different RPA server?
+NR
+Northage, Rebecca
+17 minutes 47 seconds17:47
+Northage, Rebecca 17 minutes 47 seconds
+That's what we'll need to decide on a case by case basis. So we don't want to overload the server. So if you've got a large tool that's running all day, every day, you may want your own. If you've got something that you're running once a month, we can probably share it.
+MS
+Makker, Sakshi
+17 minutes 50 seconds17:50
+Makker, Sakshi 17 minutes 50 seconds
+Okay, got it.
+Makker, Sakshi 17 minutes 54 seconds
+M.
+CC
+Clark, Chris
+18 minutes 4 seconds18:04
+Clark, Chris 18 minutes 4 seconds
+It's the infrastructure is scalable. So, you know, if there is more demand for it, it can be scaled out. And this is why we go through the design discussions, because then we can validate that and obviously give some support and direction if we need to create more infrastructure.
+MS
+Makker, Sakshi
+18 minutes 4 seconds18:04
+Makker, Sakshi 18 minutes 4 seconds
+Got it.
+Makker, Sakshi 18 minutes 7 seconds
+Understood.
+Makker, Sakshi 18 minutes 19 seconds
+Understood, got it.
+NR
+Northage, Rebecca
+18 minutes 28 seconds18:28
+Northage, Rebecca 18 minutes 28 seconds
+Okay, so we're kind of, obviously you've got your project charter at the moment and shared the information with me. We're basically at this point at the moment. Once we've got that confirmed and you guys are happy with what you're going to build and design, I can start running this whilst you review your ERB with Chris.
+MS
+Makker, Sakshi
+18 minutes 36 seconds18:36
+Makker, Sakshi 18 minutes 36 seconds
+M.
+Makker, Sakshi 18 minutes 45 seconds
+Mm.
+NR
+Northage, Rebecca
+18 minutes 49 seconds18:49
+Northage, Rebecca 18 minutes 49 seconds
+And I shared that document in an email as well, or Chris did. Yeah.
+MS
+Makker, Sakshi
+18 minutes 51 seconds18:51
+Makker, Sakshi 18 minutes 51 seconds
+Yeah, yeah, yeah, yeah, we have it, yes.
+NR
+Northage, Rebecca
+18 minutes 56 seconds18:56
+Northage, Rebecca 18 minutes 56 seconds
+Yeah, so once you're happy.
+MS
+Makker, Sakshi
+18 minutes 56 seconds18:56
+Makker, Sakshi 18 minutes 56 seconds
+M.
+NR
+Northage, Rebecca
+18 minutes 59 seconds18:59
+Northage, Rebecca 18 minutes 59 seconds
+with this new solution, this model that we're using, let me know and then we can just level on the costs and I could start raising the infrastructure whilst you do the review with us.
+MS
+Makker, Sakshi
+19 minutes 8 seconds19:08
+Makker, Sakshi 19 minutes 8 seconds
+Yeah, yeah. I think first, Rebecca, Chris, we'll have to figure out, you know, how we are going to run these Python scripts using an RPA bot, because this is something that is new for everybody. So we'll have to figure out, you know, calibrate internally first before any questions that we might have.
+NR
+Northage, Rebecca
+19 minutes 23 seconds19:23
+Northage, Rebecca 19 minutes 23 seconds
+Mm-hmm.
+Northage, Rebecca 19 minutes 27 seconds
+Yeah, no problem at all.
+CC
+Clark, Chris
+19 minutes 28 seconds19:28
+Clark, Chris 19 minutes 28 seconds
+Yeah, I mean, UI pass like a quite a fair industry standard.
+Clark, Chris 19 minutes 34 seconds
+technology. So there's loads on the internet if you need to do any research or anything like that. It's pretty much, as I said, standard. And they've got their own standard frameworks as well that follows, which it does include Python.
+MS
+Makker, Sakshi
+19 minutes 35 seconds19:35
+Makker, Sakshi 19 minutes 35 seconds
+Yeah.
+Makker, Sakshi 19 minutes 39 seconds
+Yeah, sure.
+Makker, Sakshi 19 minutes 41 seconds
+Suresh.
+Makker, Sakshi 19 minutes 45 seconds
+Sure, sure, understood.
+TB
+T R, Balaji
+20 minutes 7 seconds20:07
+T R, Balaji 20 minutes 7 seconds
+Okay, sure.
+T R, Balaji 20 minutes 9 seconds
+Thank you. Thank you. Thank you, Rebecca. Thank you. Thank you, Chris, for that. Abhishek. Take care.
+JA
+Jagadeeswar Reddy, Alamuru
+20 minutes 11 seconds20:11
+Jagadeeswar Reddy, Alamuru 20 minutes 11 seconds
+Yep, thank you.
+NR
+Northage, Rebecca
+20 minutes 11 seconds20:11
+Northage, Rebecca 20 minutes 11 seconds
+OK, thanks everyone. Bye.
+MS
+Makker, Sakshi
+20 minutes 12 seconds20:12
+Makker, Sakshi 20 minutes 12 seconds
+All right, thank you. Thanks, everyone. Bye-bye. Bye.
+CC
+Clark, Chris
+20 minutes 14 seconds20:14
+Clark, Chris 20 minutes 14 seconds
+Thanks, everyone. Cheers. Bye.
+DS
+Dillibabu, Sasikala
+20 minutes 16 seconds20:16
+Dillibabu, Sasikala 20 minutes 16 seconds
+Thanks, everyone
+ 
