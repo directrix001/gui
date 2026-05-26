@@ -40,20 +40,14 @@ import pandas as pd
 
 from Submit_2_Helper_function import (
     find_row_numbers,
-    search_turnover_in_dataframe,
-    find_fmi_row_nv,
     find_fmi_row_uc,
     find_fmi_row_as,
     find_fmi_row_export,
-    search_omp_terms,
-    search_manufacturing_terms,
-    MZ_Sheet_terms,
     find_financial_indices,
     find_oem_terms,
     find_ocs_terms,
     search_rd_terms,
     find_R_and_D_File,
-    find_transfer_price_adjustment,
     tax_and_public,
     operating_profit,
     relief_search_terms_new,
@@ -88,9 +82,6 @@ Z = "=0"   # written to cells when data is unavailable
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Z-AUDIT SYSTEM
-#  Tracks every =0 assignment with its reason, grouped by category.
-#  Call z_audit.record(reason, detail, context) wherever Z is returned.
-#  Call z_audit.write_report(path) at end of run to dump the log file.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class ZAudit:
@@ -123,29 +114,14 @@ class ZAudit:
     ]
 
     def __init__(self):
-        # records[category] = list of (detail_str, context_str)
         self.records: dict[str, list[tuple[str, str]]] = defaultdict(list)
         self._start = datetime.datetime.now()
 
     def record(self, category: str, detail: str, context: str = "") -> None:
-        """
-        Log one Z-population event.
-
-        Parameters
-        ----------
-        category : str  – one of the CATEGORIES above
-        detail   : str  – what was missing / what value was found
-        context  : str  – which formula / cell / function was affected
-        """
         self.records[category].append((detail, context))
-        # Also emit to the normal logger so it shows up in real-time logs
         logger.debug(f"[Z-AUDIT] {category} | {detail} | ctx={context}")
 
     def write_report(self, output_dir: str) -> str:
-        """
-        Write a human-readable audit report to output_dir.
-        Returns the full path of the written file.
-        """
         os.makedirs(output_dir, exist_ok=True)
         ts = self._start.strftime("%Y%m%d_%H%M%S")
         report_path = os.path.join(output_dir, f"zero_population_audit_{ts}.txt")
@@ -207,12 +183,10 @@ class ZAudit:
             if not entries:
                 lines.append("  (none)")
             else:
-                # Group identical (detail, context) pairs and count them
                 counts: dict[tuple, int] = defaultdict(int)
                 for entry in entries:
                     counts[entry] += 1
-                for (detail, context), cnt in sorted(counts.items(),
-                                                      key=lambda x: -x[1]):
+                for (detail, context), cnt in sorted(counts.items(), key=lambda x: -x[1]):
                     prefix = f"  x{cnt:>3}  " if cnt > 1 else "         "
                     lines.append(f"{prefix}DETAIL : {detail}")
                     if context:
@@ -220,7 +194,6 @@ class ZAudit:
                     lines.append("")
             lines.append("")
 
-        # Summary table at the bottom
         lines.append("=" * 78)
         lines.append("  SUMMARY BY CATEGORY")
         lines.append("=" * 78)
@@ -239,7 +212,7 @@ class ZAudit:
         return report_path
 
 
-# Module-level singleton – all helpers below write into this
+# Module-level singleton
 z_audit = ZAudit()
 
 
@@ -266,7 +239,7 @@ def _int_list(lst, context: str = "") -> list:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  LAYER 1  –  INPUT CHECKERS  (now report into z_audit)
+#  LAYER 1  –  INPUT CHECKERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _df_ok(df, name: str) -> bool:
@@ -306,7 +279,7 @@ def _file_ok(path: str, name: str) -> bool:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  LAYER 2  –  SAFE WRAPPERS  (pass context to z_audit)
+#  LAYER 2  –  SAFE WRAPPERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _safe_col_short(df, month, name):
@@ -347,22 +320,6 @@ def _safe_find_row_numbers(df, name) -> dict:
         z_audit.record("EXCEPTION", str(e), f"find_row_numbers({name})")
         return {}
 
-def _safe_search_turnover(df, name) -> dict:
-    if not _df_ok(df, name): return {}
-    try:    return search_turnover_in_dataframe(df) or {}
-    except Exception as e:
-        logger.warning(f"search_turnover({name}): {e}")
-        z_audit.record("EXCEPTION", str(e), f"search_turnover_in_dataframe({name})")
-        return {}
-
-def _safe_find_fmi_nv(df, name):
-    if not _df_ok(df, name): return (0,)*16
-    try:    return tuple(_int(x, f"fmi_nv({name})") for x in find_fmi_row_nv(df, fallback_rows=(73, 81, 89, 97)) )
-    except Exception as e:
-        logger.warning(f"find_fmi_row_nv({name}): {e}")
-        z_audit.record("EXCEPTION", str(e), f"find_fmi_row_nv({name})")
-        return (0,)*16
-
 def _safe_find_fmi_uc(df, name):
     if not _df_ok(df, name): return (0,)*12
     try:    return tuple(_int(x, f"fmi_uc({name})") for x in find_fmi_row_uc(df))
@@ -386,34 +343,6 @@ def _safe_find_fmi_export(df, name):
         logger.warning(f"find_fmi_row_export({name}): {e}")
         z_audit.record("EXCEPTION", str(e), f"find_fmi_row_export({name})")
         return (0,)*16
-
-def _safe_omp(df, name) -> dict:
-    if not _df_ok(df, name): return {}
-    try:    return search_omp_terms(df) or {}
-    except Exception as e:
-        logger.warning(f"search_omp_terms({name}): {e}")
-        z_audit.record("EXCEPTION", str(e), f"search_omp_terms({name})")
-        return {}
-
-def _safe_manufacturing(df, name) -> dict:
-    if not _df_ok(df, name): return {}
-    try:    return search_manufacturing_terms(df) or {}
-    except Exception as e:
-        logger.warning(f"search_manufacturing_terms({name}): {e}")
-        z_audit.record("EXCEPTION", str(e), f"search_manufacturing_terms({name})")
-        return {}
-def _clean(val) -> str:
-    """Strip whitespace and leading apostrophes, return lowercase string."""
-    return str(val).strip().lstrip("'\"").lower()        
-
-
-def _safe_mz_sheet(df, name) -> dict:
-    if not _df_ok(df, name): return {}
-    try:    return MZ_Sheet_terms(df) or {}
-    except Exception as e:
-        logger.warning(f"MZ_Sheet_terms({name}): {e}")
-        z_audit.record("EXCEPTION", str(e), f"MZ_Sheet_terms({name})")
-        return {}
 
 def _safe_financial_indices(df, name):
     if not _df_ok(df, name): return ([0],[0],[0],[0],[0])
@@ -458,14 +387,6 @@ def _safe_rd_file(df, name) -> dict:
         logger.warning(f"find_R_and_D_File({name}): {e}")
         z_audit.record("EXCEPTION", str(e), f"find_R_and_D_File({name})")
         return {}
-
-def _safe_transfer_price(df, name):
-    if not _df_ok(df, name): return [0]
-    try:    return _int_list(find_transfer_price_adjustment(df) or [0], f"transfer_price({name})")
-    except Exception as e:
-        logger.warning(f"find_transfer_price_adjustment({name}): {e}")
-        z_audit.record("EXCEPTION", str(e), f"find_transfer_price_adjustment({name})")
-        return [0]
 
 def _safe_tax(df, name):
     if not _df_ok(df, name): return [0]
@@ -575,14 +496,13 @@ def _safe_energy(df, name):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  LAYER 4  –  SAFE FORMULA BUILDERS  (all Z returns audit-logged)
+#  LAYER 4  –  SAFE FORMULA BUILDERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _safe_gen_formula(row: int, col: int, sheet: str,
                       file_path: str = "", context: str = "") -> str:
     row, col = _int(row, context), _int(col, context)
 
-    # Diagnose which condition triggered Z
     if not row and not col:
         z_audit.record("ROW_AND_COL_ZERO",
                        f"row=0 AND col=0 for sheet='{sheet}'",
@@ -600,7 +520,6 @@ def _safe_gen_formula(row: int, col: int, sheet: str,
         return Z
 
     if file_path and not _file_ok(file_path, f"cross-wb [{sheet}]"):
-        # _file_ok already logged FILE_MISSING; add extra context
         z_audit.record("FILE_MISSING",
                        f"Cross-workbook file missing: {file_path}",
                        context or f"generate_excel_formula(sheet={sheet}, r={row}, c={col})")
@@ -679,7 +598,7 @@ def _safe_gen_formula_249(month: int, file_path_OSP: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  COMPOUND FORMULA HELPERS  (Z propagation is audited)
+#  COMPOUND FORMULA HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _join_sum(*formulas, context: str = "") -> str:
@@ -705,15 +624,14 @@ def _compound(a: str, op: str, b: str, context: str = "") -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  DICT-ROW EXTRACTOR  (missing keys are audited)
+#  DICT-ROW EXTRACTOR
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _row_from_dict(d: dict, key: str, dict_name: str = "") -> int:
-    """Extract first element of d[key] list as int; 0 + audit on any failure."""
     try:
         val = d.get(key)
         if not val:
-            if d:  # dict exists but key simply not found
+            if d:
                 z_audit.record("ROW_ZERO",
                                f"Key '{key}' not found in search dict",
                                f"_row_from_dict(dict={dict_name or 'unknown'})")
@@ -725,7 +643,7 @@ def _row_from_dict(d: dict, key: str, dict_name: str = "") -> int:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  SAFE ROW-BLOCK BUILDER  (unchanged logic, audit added)
+#  SAFE ROW-BLOCK BUILDER
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _build_row_block(
@@ -745,7 +663,6 @@ def _build_row_block(
 
     can_build = has_df and col_source > 0 and base_row > 0
 
-    # Audit why the block cannot be built
     if not can_build:
         reasons = []
         if not has_df:       reasons.append("DataFrame absent (has_df=False)")
@@ -822,7 +739,6 @@ def calculate_alternate_value_1(
     selected_month
 ) -> None:
 
-    # Reset audit for this run
     global z_audit
     z_audit = ZAudit()
 
@@ -936,65 +852,25 @@ def calculate_alternate_value_1(
     # ══════════════════════════════════════════════════════════════════════════
     logger.info("Step 2: resolving row indices")
 
-    # ── ROP NE ────────────────────────────────────────────────────────────────
-    row_map = _safe_find_row_numbers(df_P_L_ROP_NE, "df_P_L_ROP_NE") if HAS_ROP_NE else {}
-    def _r(k): return _row_from_dict(row_map, k, "row_map(ROP_NE)")
+    # ── R&D (ROP NE) ──────────────────────────────────────────────────────────
+    rd_rows = _safe_rd_terms(df_P_L_ROP_NE, "df_P_L_ROP_NE") if HAS_ROP_NE else {}
+    row_func_rd    = _row_from_dict(rd_rows, "functional r&d",     "rd_rows(ROP_NE)")
+    row_nonfunc_rd = _row_from_dict(rd_rows, "non functional r&d", "rd_rows(ROP_NE)")
 
-    row_nissan_retail   = _r("nissanretailvolume")
-    row_infiniti_retail = _r("infinitiretailvolume")
-    row_datsun_retail   = _r("datsunretailvolume")
-    row_tiv             = _r("tiv")
-    row_ms_nissan       = _r("marketshare-nissan")
-    row_ms_infiniti     = _r("marketshare-infiniti")
-    row_ms_datsun       = _r("marketshare-datsun")
-    row_opening_stock   = _r("openingstock")
-    row_nmuk            = _r("nmuk")
-    row_nmisa           = _r("nmisa")
-    row_nmgr            = _r("nmgr")
-    row_purchase_vol    = _r("purchasevolume")
-    row_total_in        = _r("totalin")
-    row_ew_nissan       = _r("europeanwholesalevolume-nissan")
-    row_ew_infiniti     = _r("europeanwholesalevolume-infiniti")
-    row_ew_datsun       = _r("europeanwholesalevolume-datsun")
-    row_exp_nissan      = _r("exportvolumenissan")
-    row_exp_infiniti    = _r("exportvolume-infiniti")
-    row_renault_trucks  = _r("renaulttrucks")
-    row_daimler         = _r("daimler")
-    row_renault         = _r("renault")
-    row_gtr_idg         = _r("gtr[idg]")
-    row_captives        = _r("captives")
-    row_scope_adj       = _r("scopeadjustment")
-    row_closing_stock   = _r("closingstock")
-
-    # ── Turnover ──────────────────────────────────────────────────────────────
-    t2 = _safe_search_turnover(df_P_L_ROP_NE, "df_P_L_ROP_NE") if HAS_ROP_NE else {}
-    def _t(k):
-        k_clean=str(k).strip().lstrip("'\"").lower()
-        return _row_from_dict(t2, k_clean, "turnover_map(ROP_NE)")
-
-    row_nissan_nv   = _t("nissan nv")
-    row_nissan_bb   = _t("nissan bb")
-    row_infiniti_nv = _t("infiniti nv")
-    row_infiniti_bb = _t("infiniti bb")
-    row_datsun_nv   = _t("datsun nv")
-    row_datsun_bb   = _t("datsun bb")
-    row_nissan_uc   = _t("nissan used cars")
-    row_infiniti_uc = _t("infiniti used cars")
-    row_nissan_as   = _t("nissan after sales")
-    row_infiniti_as = _t("infiniti after sales")
-    row_datsun_as   = _t("datsun after sales")
-    row_exp_nis_t   = _t("export nissan")
-    row_exp_inf_t   = _t("export infiniti")
-    # row_nissan_nv=73
-    # row_infiniti_nv=89
-
+    # ── R&D File ──────────────────────────────────────────────────────────────
+    rd_file = _safe_rd_file(df_r_and_d, "df_r_and_d") if HAS_R_AND_D else {}
+    def _rdf(k): return _row_from_dict(rd_file, k, "rd_file_map")
+    row_func_rd_rev  = _rdf("functional r&d revenue")
+    row_func_rd_cost = _rdf("functional r&d cost")
+    row_nf_rd_rev    = _rdf("non functional r&d revenue")
+    row_nf_rd_cost   = _rdf("non functional r&d cost")
 
     # ── FMI ───────────────────────────────────────────────────────────────────
     (fmi_nis_nv, trn_nis_nv, cos_nis_nv, vme_nis_nv,
      fmi_dat_nv, trn_dat_nv, cos_dat_nv, vme_dat_nv,
      fmi_inf_nv, trn_inf_nv, cos_inf_nv, vme_inf_nv,
      fmi_tot_nv, trn_tot_nv, cos_tot_nv, vme_tot_nv,
-     ) = (97,22,3,4,5,6,7,8,9,10,2,3,2,1,2,3) if HAS_ROP_NE else (0,)*16
+     ) = (97, 22, 3, 4, 5, 6, 7, 8, 9, 10, 2, 3, 2, 1, 2, 3) if HAS_ROP_NE else (0,)*16
 
     (fmi_nis_uc, trn_nis_uc, cos_nis_uc, vme_nis_uc,
      fmi_dat_uc, trn_dat_uc, cos_dat_uc, vme_dat_uc,
@@ -1013,91 +889,9 @@ def calculate_alternate_value_1(
      fmi_tot_ex, trn_tot_ex, cos_tot_ex, vme_tot_ex,
      ) = _safe_find_fmi_export(df_P_L_ROP_NE, "df_P_L_ROP_NE") if HAS_ROP_NE else (0,)*16
 
-    # ── OMP ───────────────────────────────────────────────────────────────────
-    omp = _safe_omp(df_P_L_ROP_NE, "df_P_L_ROP_NE") if HAS_ROP_NE else {}
-    def _omp(k): return _row_from_dict(omp, k, "omp_map(ROP_NE)")
-    row_x83_rop       = _omp("x83 sales to renault")
-    row_f91r_rop      = _omp("f91r sales to renault trucks")
-    row_pp_inter_rop  = _omp("production parts sales to inter-companies")
-    row_cant_rop      = _omp("cantabria sales to third party")
-    row_parts_ren_rop = _omp("parts sales to renault")
-    row_bat_oth_rop   = _omp("battery plant other costs")
-    row_scraps_rop    = _omp("scraps sales")
-    row_pensions_rop  = _omp("pensions")
-    row_others_rop    = _omp("others")
-
-    # ── Manufacturing ─────────────────────────────────────────────────────────
-    mfg = _safe_manufacturing(df_P_L_ROP_NE, "df_P_L_ROP_NE") if HAS_ROP_NE else {}
-    def _mfg(k): return _row_from_dict(mfg, k, "mfg_map(ROP_NE)")
-    row_materials      = _mfg("materials costs")
-    row_bo_reduct      = _mfg("b/o cost reduction")
-    row_renault_tp     = _mfg("renault tp")
-    row_ic_kd          = _mfg("intercompany parts / kd")
-    row_inbound_fr     = _mfg("inbound freight / insurance")
-    row_inbound_duty   = _mfg("inbound duty")
-    row_inhouse_dl     = _mfg("inhouse / direct labour")
-    row_bat_nmuk_mfg   = _mfg("battery (nmuk)")
-    row_events         = _mfg("events")
-    row_oth_adj_mfg    = _mfg("other adjustments")
-    row_others_mfg     = _mfg("others")
-    row_core_fixed     = _mfg("core fixed")
-    row_pic_nissan     = _mfg("pic (nissan)")
-    row_regional_cost  = _mfg("regional cost")
-    row_vend_tool      = _mfg("vendor tooling depreciation")
-    row_projects       = _mfg("projects")
-    row_nesas          = _mfg("nesas/nisa manufacturing")
-    row_bat_fixed      = _mfg("battery fixed")
-    row_inf_fixed_gd1a = _mfg("infiniti fixed cost (gd1a)")
-    row_maint_dd       = _mfg("maintenance of existing models (d&d)")
-    row_gd1a_shift     = _mfg("gd1a top position shift to icp")
-    row_supp_claims    = _mfg("supplier claims & other")
-
-    # ── G&A financial indices ─────────────────────────────────────────────────
-    (idx_labour, idx_is, idx_dep, idx_prov, idx_overhead) = (
-        _safe_financial_indices(df_P_L_ROP_NE, "df_P_L_ROP_NE")
-        if HAS_ROP_NE else ([0],[0],[0],[0],[0])
-    )
-
-    # ── OEM ───────────────────────────────────────────────────────────────────
-    (oem_trn, oem_std, oem_mgn, oem_veh,
-     oem_log, oem_roy, oem_oth, oem_eop) = (
-        _safe_oem_terms(df_P_L_ROP_NE, "df_P_L_ROP_NE")
-        if HAS_ROP_NE else ([0],[0],[0],[0],[0],[0],[0],[0])
-    )
-
-    # ── OCS ───────────────────────────────────────────────────────────────────
-    ocs_row = _safe_ocs_terms(df_P_L_ROP_NE, "df_P_L_ROP_NE") if HAS_ROP_NE else [0]
-
-    # ── R&D (ROP NE) ──────────────────────────────────────────────────────────
-    rd_rows = _safe_rd_terms(df_P_L_ROP_NE, "df_P_L_ROP_NE") if HAS_ROP_NE else {}
-    row_func_rd    = _row_from_dict(rd_rows, "functional r&d",     "rd_rows(ROP_NE)")
-    row_nonfunc_rd = _row_from_dict(rd_rows, "non functional r&d", "rd_rows(ROP_NE)")
-
-    # ── R&D File ──────────────────────────────────────────────────────────────
-    rd_file = _safe_rd_file(df_r_and_d, "df_r_and_d") if HAS_R_AND_D else {}
-    def _rdf(k): return _row_from_dict(rd_file, k, "rd_file_map")
-    row_func_rd_rev  = _rdf("functional r&d revenue")
-    row_func_rd_cost = _rdf("functional r&d cost")
-    row_nf_rd_rev    = _rdf("non functional r&d revenue")
-    row_nf_rd_cost   = _rdf("non functional r&d cost")
-
-    # ── MZ conso ──────────────────────────────────────────────────────────────
-    mz = _safe_mz_sheet(df_MZ_conso, "df_MZ_conso") if HAS_MZ else {}
-    def _mz(k): return _row_from_dict(mz, k, "mz_map")
-    row_mz_x83      = _mz("x83 sales to renault")
-    row_mz_trucks   = _mz("sales to renault trucks")
-    row_mz_pp_inter = _mz("production parts sales to inter-companies")
-    row_mz_cant     = _mz("cantabria sales to third party")
-    row_mz_h4bu     = _mz("parts sales to renault (h4bu camshaft)")
-    row_mz_scrap    = _mz("scrap sales")
-    row_mz_bat      = _mz("battery plant to")
-    row_mz_others   = _mz("others")
-
     # ── HQ items ──────────────────────────────────────────────────────────────
-    # tp_list  = _safe_transfer_price(df_hQ_items, "df_hQ_items") if HAS_HQ_ITEMS else [0]
-    # tp_base  = _int(tp_list[0]) if tp_list else 0
-    tp_list=[10] if  HAS_HQ_ITEMS else [0]
-    tp_base=10 if HAS_HQ_ITEMS else 0
+    tp_list = [10] if HAS_HQ_ITEMS else [0]
+    tp_base = 10   if HAS_HQ_ITEMS else 0
 
     tax_list = _safe_tax(df_P_L_HQ, "df_P_L_HQ") if HAS_HQ else [0]
     op_list  = _safe_op (df_P_L_HQ, "df_P_L_HQ") if HAS_HQ else [0]
@@ -1186,18 +980,6 @@ def calculate_alternate_value_1(
             return Z
         return _safe_gen_formula(_int(row), col_ROP_NE, SH,
                                  context=f"fp(row={row})")
-
-    def fmz(row: int) -> str:
-        if not HAS_MZ:
-            z_audit.record("DF_MISSING", "HAS_MZ is False", f"fmz(row={row})")
-            return Z
-        if not col_MZ_conso:
-            z_audit.record("COL_ZERO",
-                           f"col_MZ_conso=0 (month {month_number} not found in MZ_conso)",
-                           f"fmz(row={row})")
-            return Z
-        return _safe_gen_formula(_int(row), col_MZ_conso, "MZ conso TGK",
-                                 context=f"fmz(row={row})")
 
     def frd(row: int) -> str:
         if not HAS_R_AND_D:
@@ -1311,7 +1093,7 @@ def calculate_alternate_value_1(
                                  context=f"fhq_item(offset={offset})")
 
     # ── HQ items formula block ────────────────────────────────────────────────
-    formula_hq_list = [fhq_item(o) for o in [5,3,6,10,18,21,22,26,4,34,1,20]]
+    formula_hq_list = [fhq_item(o) for o in [5, 3, 6, 10, 18, 21, 22, 26, 4, 34, 1, 20]]
     valid_hq = [x[1:] for x in formula_hq_list if x != Z]
     formula_hq_sum = f"=({' + '.join(valid_hq)}) / 1000000" if valid_hq else Z
     if not valid_hq:
@@ -1337,9 +1119,9 @@ def calculate_alternate_value_1(
         return fhq_tgt(_int(op_base) + _int(offset))
 
     tax_parts = [x[1:] for x in [
-        ftax(3),ftax(1),ftax(20),ftax(4),ftax(22),ftax(6),
-        ftax(7),ftax(16),ftax(18),
-        fop(0),fop(1),fop(2),fop(3),
+        ftax(3), ftax(1), ftax(20), ftax(4), ftax(22), ftax(6),
+        ftax(7), ftax(16), ftax(18),
+        fop(0), fop(1), fop(2), fop(3),
     ] if x != Z]
     formula_hq_tax_sum = f"=({' + '.join(tax_parts)}) / 1000000" if tax_parts else Z
     if not tax_parts:
@@ -1394,11 +1176,9 @@ def calculate_alternate_value_1(
     _energy_offset = energy_row - tp_base
     if not (energy_row and tp_base):
         if not energy_row:
-            z_audit.record("ROW_ZERO", "energy_row=0 — energy_tgk_68 returned 0",
-                           "f_energy")
+            z_audit.record("ROW_ZERO", "energy_row=0 — energy_tgk_68 returned 0", "f_energy")
         if not tp_base:
-            z_audit.record("ROW_ZERO", "tp_base=0 — transfer price base row is 0",
-                           "f_energy")
+            z_audit.record("ROW_ZERO", "tp_base=0 — transfer price base row is 0", "f_energy")
     f_energy = fhq_item(_energy_offset) if (energy_row and tp_base) else Z
 
     # ── OSP formulas ──────────────────────────────────────────────────────────
@@ -1428,8 +1208,7 @@ def calculate_alternate_value_1(
     f_ex_249  = _ex(SH_REL, 249, _int(col_KPI_write) - 1, "f_ex_249")
     f_249     = _safe_gen_formula_249(month_number, file_path_OSP) if HAS_FILE_OSP else Z
     if not HAS_FILE_OSP:
-        z_audit.record("FILE_MISSING", f"OSP file missing for f_249: {file_path_OSP}",
-                       "f_249")
+        z_audit.record("FILE_MISSING", f"OSP file missing for f_249: {file_path_OSP}", "f_249")
     f_sum249  = _compound(f_249, "-", f_ex_249, context="f_sum249")
 
     f_osp_ex1 = _ex(SH_REL, 239, _int(col_KPI_write) - 1, "f_osp_ex1")
@@ -1452,9 +1231,9 @@ def calculate_alternate_value_1(
         r = _int(abs_row) - 2
         if not (HAS_FILE_TGK and r > 0 and col_osp_tgk):
             reasons = []
-            if not HAS_FILE_TGK:   reasons.append(f"OSP TGK file missing: {file_paths_OSP_TGK}")
-            if r <= 0:             reasons.append(f"computed row={r} <= 0 (abs_row={abs_row})")
-            if not col_osp_tgk:    reasons.append(f"col_osp_tgk=0")
+            if not HAS_FILE_TGK:  reasons.append(f"OSP TGK file missing: {file_paths_OSP_TGK}")
+            if r <= 0:            reasons.append(f"computed row={r} <= 0 (abs_row={abs_row})")
+            if not col_osp_tgk:   reasons.append(f"col_osp_tgk=0")
             z_audit.record("FILE_MISSING" if not HAS_FILE_TGK else "ROW_ZERO",
                            "; ".join(reasons), f"_tgk(abs_row={abs_row})")
             return Z
@@ -1565,18 +1344,13 @@ def calculate_alternate_value_1(
     f_relief_10 = f"=-({_pp_raw[1:]})/10^6" if _pp_raw != Z else Z
 
     # ── UED ───────────────────────────────────────────────────────────────────
-    # formula_ued_raw = HFM   # deliberately uses HFM reference instead of file extract
-
-    f_ued_tmpl = _ex("P&L Actual", 340, _int(col_PL_write) , "UED_template")
+    f_ued_tmpl = _ex("P&L Actual", 340, _int(col_PL_write), "UED_template")
     f_sum_UED  = (
-        # f"=({formula_ued_raw}-{f_ued_tmpl[1:]})/1000"
         f"=({f_ued_tmpl[1:]})/1000"
         if (f_ued_tmpl != Z) else Z
     )
     if f_ued_tmpl == Z:
-        z_audit.record("COMPOUND_Z",
-                       "f_ued_tmpl is Z → f_sum_UED falls to Z",
-                       "f_sum_UED")
+        z_audit.record("COMPOUND_Z", "f_ued_tmpl is Z → f_sum_UED falls to Z", "f_sum_UED")
 
     # ── MCCP ──────────────────────────────────────────────────────────────────
     f_mccp1 = fmccp(208)
@@ -1605,33 +1379,11 @@ def calculate_alternate_value_1(
     f_kpi_18  = frel(row_rel_recall)
     f_kpi_conn= frel(row_rel_conn)
 
-    f_sum_kpi_1 = _join_sum(f_kpi_2, f_kpi_3,                          context="f_sum_kpi_1")
-    f_sum_kpi_2 = _join_sum(f_kpi_4, f_kpi_4_1,                        context="f_sum_kpi_2")
+    f_sum_kpi_1 = _join_sum(f_kpi_2, f_kpi_3,                               context="f_sum_kpi_1")
+    f_sum_kpi_2 = _join_sum(f_kpi_4, f_kpi_4_1,                             context="f_sum_kpi_2")
     f_sum_kpi_3 = _join_sum(f_kpi_7, f_kpi_8, f_kpi_9, f_kpi_10, f_kpi_11, context="f_sum_kpi_3")
-    f_sum_kpi_4 = _join_sum(f_kpi_conn, f_kpi_13,                       context="f_sum_kpi_4")
-    f_sum_kpi_5 = _join_sum(f_kpi_14, f_kpi_15, f_kpi_16, f_kpi_17,    context="f_sum_kpi_5")
-
-    # ── Manufacturing other-adjustments ───────────────────────────────────────
-    f_sum_mfg_oth = _join_sum(fp(row_oth_adj_mfg), fp(row_others_mfg),
-                              context="f_sum_mfg_oth")
-
-    # ── OEM brand summations ──────────────────────────────────────────────────
-    def _oem_sum(i: int) -> str:
-        a = fp(_int(oem_std[i])) if (oem_std and len(oem_std) > i and oem_std[i]) else Z
-        b = fp(_int(oem_oth[i])) if (oem_oth and len(oem_oth) > i and oem_oth[i]) else Z
-        return _join_sum(a, b, context=f"_oem_sum(brand_idx={i})")
-
-    # ── G&A index helper ──────────────────────────────────────────────────────
-    def _idx(arr, i) -> str:
-        if not HAS_ROP_NE:
-            z_audit.record("DF_MISSING", "HAS_ROP_NE is False", f"_idx(arr, i={i})")
-            return Z
-        if not arr or len(arr) <= i:
-            z_audit.record("ROW_ZERO",
-                           f"G&A index array has no element at index {i}",
-                           f"_idx(i={i})")
-            return Z
-        return fp(_int(arr[i])) if arr[i] else Z
+    f_sum_kpi_4 = _join_sum(f_kpi_conn, f_kpi_13,                           context="f_sum_kpi_4")
+    f_sum_kpi_5 = _join_sum(f_kpi_14, f_kpi_15, f_kpi_16, f_kpi_17,        context="f_sum_kpi_5")
 
     # ══════════════════════════════════════════════════════════════════════════
     #  STEP 4  –  CELL UPDATE TABLES
@@ -1672,10 +1424,10 @@ def calculate_alternate_value_1(
                         tp_base and HAS_FILE_HQ_ITEM)
     if not _hq_block_ok and col_hq_tgt:
         reasons = []
-        if not HAS_HQ_ITEMS:    reasons.append("df_hQ_items absent")
-        if not col_hq:          reasons.append(f"col_hq=0 (month {month_number} not found)")
-        if not tp_base:         reasons.append("tp_base=0")
-        if not HAS_FILE_HQ_ITEM: reasons.append(f"HQ Item file missing: {file_HQ_Item}")
+        if not HAS_HQ_ITEMS:      reasons.append("df_hQ_items absent")
+        if not col_hq:            reasons.append(f"col_hq=0 (month {month_number} not found)")
+        if not tp_base:           reasons.append("tp_base=0")
+        if not HAS_FILE_HQ_ITEM:  reasons.append(f"HQ Item file missing: {file_HQ_Item}")
         z_audit.record("DF_MISSING" if not HAS_HQ_ITEMS else "FILE_MISSING",
                        "HQ block rows 9-44 set to Z: " + "; ".join(reasons),
                        "upd_hq block assembly")
@@ -1698,123 +1450,9 @@ def calculate_alternate_value_1(
     # ── P&L Actual ────────────────────────────────────────────────────────────
     col_pl = _c(col_PL_write)
     upd_pl = [
-        # (5,  col_pl, fp(row_nissan_retail)),
-        # (6,  col_pl, fp(row_infiniti_retail)),
-        # (7,  col_pl, fp(row_datsun_retail)),
-        # (9,  col_pl, fp(row_tiv)),
-        # (10, col_pl, fp(row_ms_nissan)),
-        # (11, col_pl, fp(row_ms_infiniti)),
-        # (12, col_pl, fp(row_ms_datsun)),
-        # (14, col_pl, fp(row_opening_stock)),
-        # (15, col_pl, fp(row_nmuk)),
-        # (16, col_pl, fp(row_nmisa)),
-        # (17, col_pl, fp(row_nmgr)),
-        # (19, col_pl, fp(row_purchase_vol)),
-        # (20, col_pl, fp(row_total_in)),
-        # (21, col_pl, fp(row_ew_nissan)),
-        # (22, col_pl, fp(row_ew_infiniti)),
-        # (23, col_pl, fp(row_ew_datsun)),
-        # (25, col_pl, fp(row_exp_nissan)),
-        # (26, col_pl, fp(row_exp_infiniti)),
-        # (29, col_pl, fp(row_renault_trucks)),
-        # (30, col_pl, fp(row_daimler)),
-        # (31, col_pl, fp(row_renault)),
-        # (32, col_pl, fp(row_gtr_idg)),
-        # (34, col_pl, fp(row_captives)),
-        # (36, col_pl, fp(row_scope_adj)),
-        # (37, col_pl, fp(row_closing_stock)),
-        # (10, 20, _safe_gen_formula(15, 18, SH, context="fixed_ms_nissan")  if HAS_ROP_NE else Z),
-        # (11, 20, _safe_gen_formula(17, 18, SH, context="fixed_ms_infiniti") if HAS_ROP_NE else Z),
-        # (12, 20, _safe_gen_formula(19, 18, SH, context="fixed_ms_datsun")  if HAS_ROP_NE else Z),
-        # (39, col_pl, fp(row_nissan_nv)),   (40, col_pl, fp(row_nissan_bb)),
-        # (42, col_pl, fp(row_infiniti_nv)), (43, col_pl, fp(row_infiniti_bb)),
-        # (45, col_pl, fp(row_datsun_nv)),   (46, col_pl, fp(row_datsun_bb)),
-        # (48, col_pl, fp(row_nissan_uc)),   (49, col_pl, fp(row_infiniti_uc)),
-        # (52, col_pl, fp(row_nissan_as)),   (53, col_pl, fp(row_infiniti_as)),
-        # (54, col_pl, fp(row_datsun_as)),
-        # (57, col_pl, fp(row_exp_nis_t)),   (58, col_pl, fp(row_exp_inf_t)),
-        # (60, col_pl, fmz(row_mz_x83)),    (61, col_pl, fmz(row_mz_trucks)),
-        # (62, col_pl, fmz(row_mz_pp_inter)),(63, col_pl, fmz(row_mz_cant)),
-        # (64, col_pl, fmz(row_mz_h4bu)),   (65, col_pl, fmz(row_mz_scrap)),
-        # (66, col_pl, fmz(row_mz_bat)),    (69, col_pl, fmz(row_mz_others)),
-        # (73, col_pl, fp(trn_nis_nv)), (74, col_pl, fp(cos_nis_nv)),
-        # (76, col_pl, fp(vme_nis_nv)), (78, col_pl, fp(fmi_nis_nv)),
-        # (81, col_pl, fp(trn_inf_nv)), (82, col_pl, fp(cos_inf_nv)),
-        # (84, col_pl, fp(vme_inf_nv)), (86, col_pl, fp(fmi_inf_nv)),
-        # (89, col_pl, fp(trn_dat_nv)), (90, col_pl, fp(cos_dat_nv)),
-        # (92, col_pl, fp(vme_dat_nv)), (94, col_pl, fp(fmi_dat_nv)),
-        # (105, col_pl, fp(trn_nis_uc)), (106, col_pl, fp(cos_nis_uc)),
-        # (108, col_pl, fp(vme_nis_uc)), (110, col_pl, fp(fmi_nis_uc)),
-        # (113, col_pl, fp(trn_dat_uc)), (114, col_pl, fp(cos_dat_uc)),
-        # (116, col_pl, fp(vme_dat_uc)), (118, col_pl, fp(fmi_dat_uc)),
-        # (137, col_pl, fp(trn_nis_as)), (138, col_pl, fp(cos_nis_as)),
-        # (140, col_pl, fp(vme_nis_as)), (142, col_pl, fp(fmi_nis_as)),
-        # (145, col_pl, fp(trn_inf_as)), (146, col_pl, fp(cos_inf_as)),
-        # (148, col_pl, fp(vme_inf_as)), (150, col_pl, fp(fmi_inf_as)),
-        # (153, col_pl, fp(trn_dat_as)), (154, col_pl, fp(cos_dat_as)),
-        # (156, col_pl, fp(vme_dat_as)), (158, col_pl, fp(fmi_dat_as)),
-        # (171, col_pl, fp(trn_nis_ex)), (172, col_pl, fp(cos_nis_ex)),
-        # (174, col_pl, fp(vme_nis_ex)),
-        # (178, col_pl, fp(trn_inf_ex)), (179, col_pl, fp(cos_inf_ex)),
-        # (181, col_pl, fp(vme_inf_ex)), (183, col_pl, fp(fmi_inf_ex)),
-        # (193, col_pl, fp(row_x83_rop)),       (194, col_pl, fp(row_f91r_rop)),
-        # (195, col_pl, fp(row_pp_inter_rop)),  (196, col_pl, fp(row_cant_rop)),
-        # (197, col_pl, fp(row_parts_ren_rop)), (198, col_pl, fp(row_bat_oth_rop)),
-        # (199, col_pl, fp(row_scraps_rop)),    (200, col_pl, fp(row_pensions_rop)),
-        # (203, col_pl, fp(row_others_rop)),
-        # (206, col_pl, fp(row_materials)),    (207, col_pl, fp(row_bo_reduct)),
-        # (208, col_pl, fp(row_renault_tp)),   (209, col_pl, fp(row_ic_kd)),
-        # (210, col_pl, fp(row_inbound_fr)),   (211, col_pl, fp(row_inbound_duty)),
-        # (212, col_pl, fp(row_inhouse_dl)),   (213, col_pl, fp(row_bat_nmuk_mfg)),
-        # (217, col_pl, f_sum_mfg_oth),
-        # (219, col_pl, fp(row_core_fixed)),   (220, col_pl, fp(row_pic_nissan)),
-        # (221, col_pl, fp(row_regional_cost)),(222, col_pl, fp(row_vend_tool)),
-        # (223, col_pl, fp(row_projects)),     (224, col_pl, fp(row_nesas)),
-        # (225, col_pl, fp(row_bat_fixed)),    (226, col_pl, fp(row_inf_fixed_gd1a)),
-        # (227, col_pl, fp(row_maint_dd)),     (228, col_pl, fp(row_gd1a_shift)),
-        # (229, col_pl, fp(row_supp_claims)),
-        # (230, col_pl, fp(row_supp_claims + 1) if row_supp_claims else Z),
-        # *_build_row_block(
-        #     base_row        = _int(ocs_row[0]) if (ocs_row and ocs_row[0]) else 0,
-        #     col_write       = col_pl,
-        #     has_df          = HAS_ROP_NE,
-        #     col_source      = col_ROP_NE,
-        #     fp_fn           = fp,
-        #     zero_sentinel   = Z,
-        #     start_excel_row = 235,
-        #     count           = 37,
-        #     block_name      = "OCS_block",
-        # ),
-        # (275, col_pl, fp(_int(oem_trn[0])) if oem_trn and oem_trn[0] else Z),
-        # (276, col_pl, _oem_sum(0)),
-        # (277, col_pl, fp(_int(oem_mgn[0])) if oem_mgn and oem_mgn[0] else Z),
-        # (278, col_pl, fp(_int(oem_veh[0])) if oem_veh and oem_veh[0] else Z),
-        # (279, col_pl, fp(_int(oem_log[0])) if oem_log and oem_log[0] else Z),
-        # (280, col_pl, fp(_int(oem_roy[0])) if oem_roy and oem_roy[0] else Z),
-        # (282, col_pl, fp(_int(oem_trn[1])) if oem_trn and len(oem_trn)>1 and oem_trn[1] else Z),
-        # (283, col_pl, _oem_sum(1)),
-        # (284, col_pl, fp(_int(oem_mgn[1])) if oem_mgn and len(oem_mgn)>1 and oem_mgn[1] else Z),
-        # (285, col_pl, fp(_int(oem_veh[1])) if oem_veh and len(oem_veh)>1 and oem_veh[1] else Z),
-        # (286, col_pl, fp(_int(oem_log[1])) if oem_log and len(oem_log)>1 and oem_log[1] else Z),
-        # (287, col_pl, fp(_int(oem_roy[1])) if oem_roy and len(oem_roy)>1 and oem_roy[1] else Z),
-        # (289, col_pl, fp(_int(oem_trn[2])) if oem_trn and len(oem_trn)>2 and oem_trn[2] else Z),
-        # (290, col_pl, _oem_sum(2)),
-        # (291, col_pl, fp(_int(oem_mgn[2])) if oem_mgn and len(oem_mgn)>2 and oem_mgn[2] else Z),
-        # (292, col_pl, fp(_int(oem_veh[2])) if oem_veh and len(oem_veh)>2 and oem_veh[2] else Z),
-        # (293, col_pl, fp(_int(oem_log[2])) if oem_log and len(oem_log)>2 and oem_log[2] else Z),
-        # (294, col_pl, fp(_int(oem_roy[2])) if oem_roy and len(oem_roy)>2 and oem_roy[2] else Z),
         (304, col_pl, fp(row_func_rd)),    (305, col_pl, fp(row_nonfunc_rd)),
         (307, col_pl, frd(row_func_rd_rev)),  (308, col_pl, frd(row_func_rd_cost)),
         (309, col_pl, frd(row_nf_rd_rev)),    (310, col_pl, frd(row_nf_rd_cost)),
-        # (313, col_pl, _idx(idx_labour,  0)), (314, col_pl, _idx(idx_is,       0)),
-        # (315, col_pl, _idx(idx_dep,     0)), (316, col_pl, _idx(idx_prov,     0)),
-        # (317, col_pl, _idx(idx_overhead,0)),
-        # (319, col_pl, _idx(idx_labour,  1)), (320, col_pl, _idx(idx_is,       1)),
-        # (321, col_pl, _idx(idx_dep,     1)), (322, col_pl, _idx(idx_prov,     1)),
-        # (323, col_pl, _idx(idx_overhead,1)),
-        # (325, col_pl, _idx(idx_labour,  2)), (326, col_pl, _idx(idx_is,       2)),
-        # (327, col_pl, _idx(idx_dep,     2)), (328, col_pl, _idx(idx_prov,     2)),
-        # (329, col_pl, _idx(idx_overhead,2)),
         (338, col_pl, formula_hq_sum),
         (339, col_pl, formula_hq_tax_sum),
         (340, col_pl, f_sum_UED),
@@ -1859,7 +1497,6 @@ def calculate_alternate_value_1(
     )
     logger.info(f"P&L output written → {result_path}  ({time.time()-t0:.1f}s)")
 
-    # ── Write Z-audit report ──────────────────────────────────────────────────
     audit_report_path = z_audit.write_report(output_path)
     logger.info(f"Z-Audit report → {audit_report_path}")
 
