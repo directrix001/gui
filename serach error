@@ -1,0 +1,29 @@
+   rd_file = _safe_rd_file(df_r_and_d, "df_r_and_d") if HAS_R_AND_D else {}
+    def _rdf(k): return _row_from_dict(rd_file, k, "rd_file_map")
+    row_func_rd_rev  = _rdf("functional r&d revenue")
+    row_func_rd_cost = _rdf("functional r&d cost")
+    row_nf_rd_rev    = _rdf("non functional r&d revenue")
+    row_nf_rd_cost   = _rdf("non functional r&d cost")
+def _safe_rd_file(df, name) -> dict:
+    if not _df_ok(df, name): return {}
+    try:    return find_R_and_D_File(df) or {}
+    except Exception as e:
+        logger.warning(f"find_R_and_D_File({name}): {e}")
+        z_audit.record("EXCEPTION", str(e), f"find_R_and_D_File({name})")
+        return {}
+
+def find_R_and_D_File(df: pd.DataFrame) -> dict[str, list[int]]:
+    df_lower = df.applymap(lambda x: x.lower() if isinstance(x, str) else x)
+    last = df.index[-1]
+    start, end = last - 15, last
+    terms = [
+        "functional r&d revenue",
+        "functional r&d cost",
+        "non functional r&d revenue",
+        "non functional r&d cost",
+    ]
+    return {
+        t: df_lower.iloc[start:end][df_lower.isin([t]).any(axis=1)].index.tolist()
+        for t in terms
+    }
+ 
