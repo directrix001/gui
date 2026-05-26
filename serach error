@@ -21,3 +21,10 @@ def find_R_and_D_File(df: pd.DataFrame) -> dict[str, list[int]]:
         result[t] = df_window.index[mask].tolist()
 
     return result
+
+   rd_file = _safe_rd_file(df_r_and_d, "df_r_and_d") if HAS_R_AND_D else {}
+    def _rdf(k): return _row_from_dict(rd_file, k, "rd_file_map")
+    row_func_rd_rev  = _rdf("functional r&d revenue")
+    row_func_rd_cost = _rdf("functional r&d cost")
+    row_nf_rd_rev    = _rdf("non functional r&d revenue")
+    row_nf_rd_cost   = _rdf("non functional r&d cost")
