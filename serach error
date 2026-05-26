@@ -1,30 +1,12 @@
-def find_R_and_D_File(df: pd.DataFrame) -> dict[str, list[int]]:
-    # Use .map() instead of deprecated .applymap()
-    df_lower = df.map(lambda x: x.lower() if isinstance(x, str) else x)
+    tax_list = _safe_tax(df_P_L_HQ, "df_P_L_HQ") if HAS_HQ else [0]
+    op_list  = _safe_op (df_P_L_HQ, "df_P_L_HQ") if HAS_HQ else [0]
+    tax_base = _int(tax_list[0]) if tax_list else 0
+    op_base  = _int(op_list[0])  if op_list  else 0
 
-    terms = [
-        "functional r&d revenue",
-        "functional r&d cost",
-        "non functional r&d revenue",
-        "non functional r&d cost",
-    ]
-
-    # Work in positional space entirely — last 15 rows by position
-    total_rows = len(df_lower)
-    start_pos = max(0, total_rows - 1)          # never go negative
-    df_window = df_lower.iloc[start_pos:]        # slice by position
-
-    result = {}
-    for t in terms:
-        # Build mask only on the window, then convert positional hits to original labels
-        mask = df_window.isin([t]).any(axis=1)
-        result[t] = df_window.index[mask].tolist()
-
-    return result
-
-   rd_file = _safe_rd_file(df_r_and_d, "df_r_and_d") if HAS_R_AND_D else {}
-    def _rdf(k): return _row_from_dict(rd_file, k, "rd_file_map")
-    row_func_rd_rev  = _rdf("functional r&d revenue")
-    row_func_rd_cost = _rdf("functional r&d cost")
-    row_nf_rd_rev    = _rdf("non functional r&d revenue")
-    row_nf_rd_cost   = _rdf("non functional r&d cost")
+def _safe_tax(df, name):
+    if not _df_ok(df, name): return [0]
+    try:    return _int_list(tax_and_public(df) or [0], f"tax_and_public({name})")
+    except Exception as e:
+        logger.warning(f"tax_and_public({name}): {e}")
+        z_audit.record("EXCEPTION", str(e), f"tax_and_public({name})")
+        return [0]
