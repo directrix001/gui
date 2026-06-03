@@ -248,8 +248,8 @@ def validate_inputs() -> bool:
         "ePWR Step2":       ePWR_var.get().strip(),
         "mEUR G&A reclass": converter_mEUR.get().strip(),
         "bJPY G&A reclass": converter_bJPY.get().strip(),
-        "New Parameter 1":  new_param_1.get().strip(),
-        "New Parameter 2":  new_param_2.get().strip(),
+        "ITP CBU Nissan":  new_param_1.get().strip(),
+        "ITP CBU Infiniti":  new_param_2.get().strip()
     }
     missing = [k for k, v in fields.items() if not v]
     if month_dropdown.current() == -1 and "Month" not in missing:
@@ -267,8 +267,8 @@ def validate_inputs() -> bool:
         "ePWR Step2":       ePWR_var.get().strip(),
         "mEUR G&A reclass": converter_mEUR.get().strip(),
         "bJPY G&A reclass": converter_bJPY.get().strip(),
-        "New Parameter 1":  new_param_1.get().strip(),
-        "New Parameter 2":  new_param_2.get().strip(),
+        "ITP CBU Nissan":  new_param_1.get().strip(),
+        "ITP CBU Infiniti":  new_param_2.get().strip(),
     }
     bad = [n for n, v in numeric_fields.items() if not _is_float(v)]
     if bad:
@@ -474,8 +474,8 @@ def perform_calculation_2():
         ui_log(f"  Café Penalty   : {var_cafe_penalty}", 'info')
         ui_log(f"  bJPY G&A       : {var_converter_bJPY}", 'info')
         ui_log(f"  mEUR G&A       : {var_converter_mEUR}", 'info')
-        ui_log(f"  New Parameter 1: {var_new_param_1}", 'info')
-        ui_log(f"  New Parameter 2: {var_new_param_2}", 'info')
+        ui_log(f"  ITP CBU Nissan: {var_new_param_1}", 'info')
+        ui_log(f"  ITP CBU Infiniti: {var_new_param_2}", 'info')
         ui_log(f"  Input folder   : {folder_path}", 'info')
         ui_log(f"  Output folder  : {output_path}", 'info')
     except Exception as e:
@@ -879,8 +879,8 @@ connectivity_var    = _param_row(inp, "Connectivity Calculation:", 3)
 cafe_penalty_var    = _param_row(inp, "Café Penalty:",             4)
 converter_bJPY      = _param_row(inp, "bJPY G&A Reclass:",        5)
 converter_mEUR      = _param_row(inp, "mEUR G&A Reclass:",        6)
-new_param_1         = _param_row(inp, "New Parameter 1:",          7)
-new_param_2         = _param_row(inp, "New Parameter 2:",          8)
+new_param_1         = _param_row(inp, "ITP CBU Nissan:",          7)
+new_param_2         = _param_row(inp, "ITP CBU Infiniti:",          8)
 inp.columnconfigure(1, weight=1)
  
 # ── Action buttons ────────────────────────────────────────────────────────────
