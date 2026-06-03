@@ -48,7 +48,7 @@ FILE_META = [
     ("Goodwill",                    "Goodwill",                      False, "Goodwill budget"),
     ("OSP TGK",                     "OSP TGK 1C",                    False, "OSP Tagetik summary"),
     ("High_Level_Variance",         "High_Level_Variance",           False, "Variance analysis"),
-    ("Relief_KD",                   "ITP KD relief",                    False, "ITP KD data"),
+    ("Relief_KD",                   "ITP KD relief",                 False, "ITP KD data"),
     ("Purchase_Price",              "Purchase Price",                 False, "Purchase price summary"),
     ("UP_Calc_Template_Simulation", "UP_Calc_Template_Simulation",   False, "UP calculation"),
     ("NANO_HFM",                    "NANO HFM",                      False, "NANO HFM actuals"),
@@ -59,22 +59,18 @@ ALL_KEYS      = [k for k, _, _, _ in FILE_META]
  
 # ═══════════════════════════════════════════════════════════════════════════════
 #  THREAD-SAFE UI LOGGER
-#  All background threads call ui_log(msg, tag).  It routes through
-#  root.after() so tkinter is only touched from the main thread.
 # ═══════════════════════════════════════════════════════════════════════════════
-# tag colour map
 _TAG_COLOURS = {
-    'phase':   '#cba6f7',   # purple  – major phase header
-    'step':    '#7aa2f7',   # blue    – normal step
-    'info':    '#6c7a8d',   # grey    – verbose detail
-    'ok':      '#a6e3a1',   # green   – success line
-    'warn':    '#f9e2af',   # yellow  – soft warning
-    'error':   '#f38ba8',   # red     – error / hard stop
-    'success': '#a6e3a1',   # alias
+    'phase':   '#cba6f7',
+    'step':    '#7aa2f7',
+    'info':    '#6c7a8d',
+    'ok':      '#a6e3a1',
+    'warn':    '#f9e2af',
+    'error':   '#f38ba8',
+    'success': '#a6e3a1',
 }
  
 def ui_log(message: str, tag: str = 'step'):
-    """Thread-safe: schedule a log append on the main thread."""
     root.after(0, _do_log, message, tag)
  
 def _do_log(message: str, tag: str):
@@ -83,24 +79,17 @@ def _do_log(message: str, tag: str):
     log_text.insert(tk.END, f'[{ts}] {message}\n', tag)
     log_text.see(tk.END)
  
-# Keep backward-compat alias used by other helpers
 def log_step(message: str, tag: str = 'step'):
     ui_log(message, tag)
  
 # ═══════════════════════════════════════════════════════════════════════════════
-#  HARD-STOP helper  –  call from any thread on unexpected error
+#  HARD-STOP helper
 # ═══════════════════════════════════════════════════════════════════════════════
 def _hard_stop(context: str, exc: Exception):
-    """
-    Log the full traceback to the log panel, show a red banner,
-    stop the progress bar, re-enable buttons.
-    Must be called from the background thread – uses root.after for UI.
-    """
     tb = traceback.format_exc()
     ui_log("━" * 60, 'error')
     ui_log(f"❌  FATAL ERROR in: {context}", 'error')
     ui_log(f"    {type(exc).__name__}: {exc}", 'error')
-    # Log each traceback line individually so they wrap nicely
     for line in tb.splitlines():
         ui_log(f"    {line}", 'error')
     ui_log("━" * 60, 'error')
@@ -108,7 +97,6 @@ def _hard_stop(context: str, exc: Exception):
     root.after(0, _ui_on_fatal, f"Error in {context}: {type(exc).__name__}: {exc}")
  
 def _ui_on_fatal(msg: str):
-    """Main-thread side of hard_stop."""
     progress_bar.stop()
     save_message_label.config(
         text=f"❌ Processing stopped – see log for details.",
@@ -118,7 +106,7 @@ def _ui_on_fatal(msg: str):
     logger.error(msg)
  
 # ═══════════════════════════════════════════════════════════════════════════════
-#  SAFE DataFrame helpers  (all log via ui_log)
+#  SAFE DataFrame helpers
 # ═══════════════════════════════════════════════════════════════════════════════
 def _empty_df() -> pd.DataFrame:
     return pd.DataFrame()
@@ -226,12 +214,11 @@ def _refresh_file_status_from_folder(folder_path: str):
     )
  
 # ═══════════════════════════════════════════════════════════════════════════════
-#  FOLDER BROWSE  –  NEVER wipes other entry content
+#  FOLDER BROWSE
 # ═══════════════════════════════════════════════════════════════════════════════
 def _browse_into(entry_widget: tk.Entry, title: str, refresh_status: bool = False):
-    """Open folder dialog and update only the target entry widget."""
     path = filedialog.askdirectory(title=title)
-    if path:                        # user cancelled → do nothing at all
+    if path:
         entry_widget.delete(0, tk.END)
         entry_widget.insert(0, path)
         if refresh_status:
@@ -261,6 +248,8 @@ def validate_inputs() -> bool:
         "ePWR Step2":       ePWR_var.get().strip(),
         "mEUR G&A reclass": converter_mEUR.get().strip(),
         "bJPY G&A reclass": converter_bJPY.get().strip(),
+        "New Parameter 1":  new_param_1.get().strip(),
+        "New Parameter 2":  new_param_2.get().strip(),
     }
     missing = [k for k, v in fields.items() if not v]
     if month_dropdown.current() == -1 and "Month" not in missing:
@@ -278,6 +267,8 @@ def validate_inputs() -> bool:
         "ePWR Step2":       ePWR_var.get().strip(),
         "mEUR G&A reclass": converter_mEUR.get().strip(),
         "bJPY G&A reclass": converter_bJPY.get().strip(),
+        "New Parameter 1":  new_param_1.get().strip(),
+        "New Parameter 2":  new_param_2.get().strip(),
     }
     bad = [n for n, v in numeric_fields.items() if not _is_float(v)]
     if bad:
@@ -406,7 +397,6 @@ def submit_action_2():
     if not validate_inputs():
         return
  
-    # Warn on missing required files – user can still proceed
     folder_path = file_path_entry.get().strip()
     missing_req = []
     if folder_path and os.path.isdir(folder_path):
@@ -423,7 +413,6 @@ def submit_action_2():
                 + "\n\nOutput may be incomplete. Continue anyway?"):
             return
  
-    # Clear log for new run
     log_text.configure(state='normal')
     log_text.delete('1.0', tk.END)
  
@@ -441,7 +430,6 @@ def submit_action_2():
     ui_log("═" * 55, 'phase')
  
 def _run_pipeline():
-    """Outer wrapper: run converter update then full calc, catch any leak."""
     try:
         _phase("PHASE 1 / 4  –  Currency Converter Update")
         update_excel_converter()
@@ -452,7 +440,7 @@ def _run_pipeline():
     perform_calculation_2()
  
 # ═══════════════════════════════════════════════════════════════════════════════
-#  MAIN CALCULATION  (background thread – every error → _hard_stop)
+#  MAIN CALCULATION
 # ═══════════════════════════════════════════════════════════════════════════════
 def _phase(label: str):
     ui_log("", 'info')
@@ -475,6 +463,8 @@ def perform_calculation_2():
         var_cafe_penalty   = float(cafe_penalty_var.get())
         var_converter_bJPY = converter_bJPY.get().strip()
         var_converter_mEUR = converter_mEUR.get().strip()
+        var_new_param_1    = float(new_param_1.get().strip())
+        var_new_param_2    = float(new_param_2.get().strip())
  
         ui_log(f"  Month          : {month_dropdown.get()}  (index {selected_month})", 'info')
         ui_log(f"  FX Converter   : {var_converter}", 'info')
@@ -484,6 +474,8 @@ def perform_calculation_2():
         ui_log(f"  Café Penalty   : {var_cafe_penalty}", 'info')
         ui_log(f"  bJPY G&A       : {var_converter_bJPY}", 'info')
         ui_log(f"  mEUR G&A       : {var_converter_mEUR}", 'info')
+        ui_log(f"  New Parameter 1: {var_new_param_1}", 'info')
+        ui_log(f"  New Parameter 2: {var_new_param_2}", 'info')
         ui_log(f"  Input folder   : {folder_path}", 'info')
         ui_log(f"  Output folder  : {output_path}", 'info')
     except Exception as e:
@@ -545,7 +537,6 @@ def perform_calculation_2():
                 marker = "[REQUIRED]" if k in REQUIRED_KEYS else "[optional]"
                 ui_log(f"  –  Missing {marker} {k}  →  empty DataFrame", 'warn' if k in REQUIRED_KEYS else 'info')
  
-        # Update checklist panel (thread-safe via after())
         for key in ALL_KEYS:
             root.after(0, _set_file_status, key, file_paths[key] is not None)
     except Exception as e:
@@ -609,19 +600,19 @@ def perform_calculation_2():
         df_p_l_reclass  = _sh(pl_summary_sheets,     'Reclass',            "P&L Summary")
         df_p_l_mccp     = _sh(pl_summary_sheets,     'MCPP',               "P&L Summary")
         df_p_l_ocs      = _sh(pl_summary_sheets,     'OCS details',        "P&L Summary")
-        df_hq_items     = _sh(hq_items_sheets,       '2026 MTD',             "HQ items")
+        df_hq_items     = _sh(hq_items_sheets,       '2026 MTD',           "HQ items")
         df_osp          = _sh(osp_calc_sheets,       'Master',             "OSP Calc Tool")
         df_hmf_mgr      = _sh(hfm_mgr_sheets,        'Managerial',         "HFM Managerial P&L")
         df_new_kpi_cfmi = _sh(new_kpi_sheets,        'CFMI',               "New KPI P&L")
         df_act          = _sh(new_kpi_sheets,        'Act',                "New KPI P&L")
         df_new_goodwill = _sh(goodwill_sheets,       'GW Budget',          "Goodwill")
         df_1c_osp       = _sh(osp_tgk_sheets,        'Summary',            "OSP TGK")
-        df_hi_var       = _sh(high_level_var_sheets, 'RS',             "High_Level_Variance")
-        df_relief_kd    = _sh(relief_kd_sheets,      'Actuals vs FY25',          "Relief_KD")
+        df_hi_var       = _sh(high_level_var_sheets, 'RS',                 "High_Level_Variance")
+        df_relief_kd    = _sh(relief_kd_sheets,      'Actuals vs FY25',    "Relief_KD")
         df_purchase     = _sh(purchase_price_sheets, 'Summary pivot',      "Purchase_Price")
         df_up_calc      = _sh(up_calc_sheets,        'UP_Calculation',     "UP_Calc_Template_Simulation")
         df_nano_hfm     = _sh(nano_hfm_sheets,       'Actual',             "NANO_HFM")
-        df_itp          = _sh(itp_sheets,            'vs FC2+10(FY25)',     "ITP")
+        df_itp          = _sh(itp_sheets,            'vs FC2+10(FY25)',    "ITP")
  
         ui_log(f"  All DataFrames ready.", 'ok')
     except Exception as e:
@@ -669,7 +660,8 @@ def perform_calculation_2():
                 var_ePWR, var_connectivity, var_cafe_penalty,
                 file_path_template_man_1, file_path_template_man,
                 file_path_goodwill_template, output_path,
-                var_converter_bJPY, var_converter_mEUR,selected_month
+                var_converter_bJPY, var_converter_mEUR, selected_month,
+                var_new_param_1, var_new_param_2
             )
             ui_log("  Engine returned successfully.", 'ok')
         except Exception as e:
@@ -718,7 +710,6 @@ def update_elapsed_time():
 def load_converter_data(_event=None):
     try:
         fp = os.path.join(base_dir, 'Mandatory_folder', 'currency_converter.xlsx')
-        # Only clear numeric entries, NEVER touch path entries
         _clear_numeric_entries()
         if not os.path.isfile(fp):
             messagebox.showinfo("Converter Data",
@@ -743,7 +734,8 @@ def load_converter_data(_event=None):
 def _clear_numeric_entries():
     """Clear ONLY the numeric parameter fields – NEVER the path entries."""
     for w in (converter_var_entry, cafe_penalty_var, connectivity_var,
-              converter_cfmi, ePWR_var, converter_bJPY, converter_mEUR):
+              converter_cfmi, ePWR_var, converter_bJPY, converter_mEUR,
+              new_param_1, new_param_2):
         w.delete(0, tk.END)
  
 def toggle_buttons(enabled: bool):
@@ -757,7 +749,7 @@ def reset_action():
     elapsed_time_label.config(text="Elapsed: 00:00")
     save_message_label.config(text="Reset – paths preserved.", fg="#f9e2af")
     toggle_buttons(True)
-    _clear_numeric_entries()   # ← ONLY numerics
+    _clear_numeric_entries()
     _reset_file_statuses()
     _status_summary_var.set("Scan to refresh")
  
@@ -777,8 +769,8 @@ FONT_UI   = ("Segoe UI", 9)
  
 root = tk.Tk()
 root.title("Europe Functional P&L – Actuals Generation Tool")
-root.geometry("900x940")
-root.minsize(720, 720)
+root.geometry("900x980")
+root.minsize(720, 760)
 root.resizable(True, True)
 root.configure(bg=BG)
  
@@ -887,6 +879,8 @@ connectivity_var    = _param_row(inp, "Connectivity Calculation:", 3)
 cafe_penalty_var    = _param_row(inp, "Café Penalty:",             4)
 converter_bJPY      = _param_row(inp, "bJPY G&A Reclass:",        5)
 converter_mEUR      = _param_row(inp, "mEUR G&A Reclass:",        6)
+new_param_1         = _param_row(inp, "New Parameter 1:",          7)
+new_param_2         = _param_row(inp, "New Parameter 2:",          8)
 inp.columnconfigure(1, weight=1)
  
 # ── Action buttons ────────────────────────────────────────────────────────────
@@ -934,7 +928,6 @@ log_text.configure(yscrollcommand=log_scroll.set)
 log_text.pack(side='left', fill='both', expand=True)
 log_scroll.pack(side='right', fill='y')
  
-# Register all tag colours
 for tag, colour in _TAG_COLOURS.items():
     log_text.tag_config(tag, foreground=colour)
  
@@ -953,7 +946,6 @@ ttk.Separator(right_frame, orient='horizontal').pack(fill='x', padx=6, pady=2)
  
 _build_file_status_panel(right_frame)
  
-# Legend (bottom of right panel)
 ttk.Separator(right_frame, orient='horizontal').pack(fill='x', padx=6, side='bottom')
 leg = tk.Frame(right_frame, bg=BG2)
 leg.pack(fill='x', padx=8, pady=6, side='bottom')
@@ -974,14 +966,3 @@ _btn(right_frame, "⟳  Scan Input Folder",
  
 # ─────────────────────────────────────────────────────────────────────────────
 root.mainloop()
-
-
-
-
-
-
-
-
-
-
-
