@@ -1,6 +1,3 @@
-
- 
- 
 """
 ACT.py  –  fully guarded KPI actuals engine  (v2)
 --------------------------------------------------
@@ -74,7 +71,7 @@ def _row_from(d: dict, key: str) -> int:
     """
     Extract first element of d[key] as int.
     Handles: list value, scalar value, None, missing key.
-    Always returns int ≥ 0.
+    Always returns int >= 0.
     """
     try:
         val = d.get(key)
@@ -152,7 +149,7 @@ def _safe_extract(file_path: str, sheet: str,
         return Z
  
 def _join(*formulas) -> str:
-    """Build '=a+b+…' skipping Z sentinels."""
+    """Build '=a+b+...' skipping Z sentinels."""
     parts = [x[1:] for x in formulas if x and x != Z]
     return f"={''.join(parts)}" if parts else Z
  
@@ -389,7 +386,6 @@ def ACT(
         logger.warning("[SKIP] HMF file absent – skipping re-read")
  
     # ── SearchResults attributes (may be 0 if search failed) ─────────────────
-    # Wrap every attribute access in _int() so arithmetic is always safe
     def _sr(attr: str) -> int:
         try:
             return _int(getattr(SearchResults, attr, 0))
@@ -413,27 +409,9 @@ def ACT(
     sheet_pl   = "P&L Actual"
     sheet_act  = "Act"
  
-    # formula_act_1  = _safe_gen_formula_1(34, col_new_kpi, sheet_new, result) if (HAS_FILE_RESULT and col_new_kpi) else Z
-    # formula_act_2  = _fhmf("wholesale_volume")
-    # formula_act_3  = _fhmf("gross_sales_wo_rd")
-    # formula_act_4  = _fhmf("rd_revenues")
-    # formula_act_5  = _fhmf("ci")
-    # formula_act_6  = _fhmf("mfg_fixed_plants")
-    # formula_act_7  = _fhmf("vendor_tooling")
-    # formula_act_8  = _fhmf("rd_costs")
-    # formula_act_9  = _fhmf("mfg_fixed_out_of_scope")
-    # formula_act_10 = _fhmf("fmi")
-    # formula_act_11 = _fhmf("ga_and_other_items")
- 
-    # sga_row = _sr("sga_total")
-    # formula_act_12 = (
-    #     _safe_gen_formula(sga_row + 1, col_hmf, sheet_man, file_path_HMF)
-    #     if (HAS_HMF and HAS_FILE_HMF and col_hmf and sga_row) else Z
-    # )
-    # formula_act_13 = _fhmf("warranty_rs")
     ROW_WHOLESALE_VOL     = 4   # replace with real row
     ROW_GROSS_SALES_WO_RD = 8   # replace with real row
-    ROW_RD_REVENUES       = 9  # replace with real row
+    ROW_RD_REVENUES       = 9   # replace with real row
     ROW_CI                = 10  # replace with real row
     ROW_MFG_FIXED_PLANTS  = 15  # replace with real row
     ROW_VENDOR_TOOLING    = 17  # replace with real row
@@ -441,8 +419,9 @@ def ACT(
     ROW_MFG_FIXED_OOS     = 16  # replace with real row
     ROW_FMI               = 23  # replace with real row
     ROW_GA_AND_OTHER      = 25  # replace with real row
-    ROW_SGA_TOTAL         = 26 # replace with real row (+1 applied inline above)
+    ROW_SGA_TOTAL         = 26  # replace with real row (+1 applied inline above)
     ROW_WARRANTY_RS       = 24  # replace with real row
+
     formula_act_1  = _safe_gen_formula_1(34,  col_new_kpi, sheet_new, result) if (HAS_FILE_RESULT and col_new_kpi) else Z
     formula_act_2  = _safe_gen_formula(ROW_WHOLESALE_VOL,       col_hmf, sheet_man, file_path_HMF) if (HAS_HMF and HAS_FILE_HMF and col_hmf) else Z
     formula_act_3  = _safe_gen_formula(ROW_GROSS_SALES_WO_RD,   col_hmf, sheet_man, file_path_HMF) if (HAS_HMF and HAS_FILE_HMF and col_hmf) else Z
@@ -459,7 +438,7 @@ def ACT(
 
     # compound HFM formulas
     formula_sum_act_1 = _join(formula_act_3, f"++{formula_act_4[1:]}") if (formula_act_3 != Z and formula_act_4 != Z) else Z
-    print("formula_sum_act_1",formula_sum_act_1)
+    print("formula_sum_act_1", formula_sum_act_1)
  
     Formula_ex_act_1   = _safe_extract(file_path_Template_man_1, sheet_act, 30, act_col_adj, "ex_act_1")
     formula_sum_act_2  = _compound(formula_act_1, "-", Formula_ex_act_1)
@@ -502,12 +481,12 @@ def ACT(
                 df_New_goodwill, month_number, search_terms
             )
             # Ensure all row lists contain ints
-            goodwill_rows    = _int_list(goodwill_rows)
-            ghq_cfmi_rows    = _int_list(ghq_cfmi_rows)
-            nmgb_buyback_rows= _int_list(nmgb_buyback_rows)
-            ger_tcs_rows     = _int_list(ger_tcs_rows)
-            act_rows         = _int_list(act_rows)
-            mobility_rows    = _int_list(mobility_rows)
+            goodwill_rows     = _int_list(goodwill_rows)
+            ghq_cfmi_rows     = _int_list(ghq_cfmi_rows)
+            nmgb_buyback_rows = _int_list(nmgb_buyback_rows)
+            ger_tcs_rows      = _int_list(ger_tcs_rows)
+            act_rows          = _int_list(act_rows)
+            mobility_rows     = _int_list(mobility_rows)
         except Exception as e:
             logger.warning(f"goodwill_raw_data_extraction: {e} – all GW rows → 0")
     else:
@@ -515,10 +494,12 @@ def ACT(
  
     sheet_gew = "GW Budget"
  
+    # ── FIX: 'r' was undefined (leftover from a commented-out line).
+    #         The parameter is 'row_list' (an int row number); guard on it directly.
     def _gw_f(row_list):
-        """Build goodwill cross-wb formula, guarding on empty list and file."""
-        # r = _gw_row(row_list, label)   # int, 0 on failure
-        if not r or not col_adj_goodwill or not HAS_FILE_GOODWILL:
+        """Build goodwill cross-wb formula, guarding on zero row and file."""
+        row_list = _int(row_list)                               # FIX: was checking undefined 'r'
+        if not row_list or not col_adj_goodwill or not HAS_FILE_GOODWILL:
             return Z
         return _safe_gen_formula_1(row_list, col_adj_goodwill, sheet_gew, file_goodwill)
  
@@ -689,7 +670,6 @@ def ACT(
     )
  
     # ── Relief compound formulas  (all row_* are int; arithmetic is safe) ─────
-    # iln export
     f_iln_nmuk  = _frel(row_iln_nmuk)
     f_iln_nmisa = _frel(row_iln_nmisa)
     # ga_imp + 1: row_ga_imp is int from _row_from → safe
@@ -745,7 +725,6 @@ def ACT(
  
     # ── f7 / f8: goodwill P&L and template cross-ref ──────────────────────────
     f7 = _fpl(102)
-    # f8 uses col_act_write (1-based) for reading the template
     f8 = (
         _safe_gen_formula_1(23, col_act_write, sheet_act, file_path_Template_1)
         if HAS_FILE_TMPL_1 and col_act_write else Z
@@ -865,5 +844,3 @@ def ACT(
         logger.warning("[SKIP] Goodwill template absent – GW output not written")
  
     logger.info("ACT completed")
- 
- 
