@@ -1,0 +1,966 @@
+"""
+Europe Functional P&L – Actuals Generation Tool
+ui_main.py  (v4 – log panel always visible)
+"""
+
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+import threading
+import traceback
+import time
+import logging
+import os
+import pandas as pd
+from datetime import datetime
+import openpyxl
+import msoffcrypto
+import shutil
+import io
+
+# ── Optional backend ──────────────────────────────────────────────────────────
+try:
+    from Submit import calculate_alternate_value_1
+    _HAS_SUBMIT2 = True
+except ImportError:
+    _HAS_SUBMIT2 = False
+
+try:
+    from utils.logger import logger
+except ImportError:
+    logger = logging.getLogger("pl_tool")
+    logging.basicConfig(level=logging.INFO)
+
+logger.info("UI triggered")
+
+base_dir    = os.getcwd()
+_stop_event = threading.Event()
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  FILE METADATA
+# ═══════════════════════════════════════════════════════════════════════════════
+FILE_META = [
+    ("P&L Summary",                 "P&L Summary",                 True,  "Main P&L data source"),
+    ("OSP Calc Tool",               "OSP Calc Tool",               False, "OSP master data"),
+    ("HFM Managerial P&L",          "HFM Managerial P&L",          True,  "HFM managerial data"),
+    ("New KPI P&L",                 "New KPI P&L",                 True,  "New KPI actuals"),
+    ("HQ items",                    "HQ items",                    False, "HQ line items"),
+    ("Goodwill",                    "Goodwill",                    False, "Goodwill budget"),
+    ("OSP TGK",                     "OSP TGK 1C",                  False, "OSP Tagetik summary"),
+    ("High_Level_Variance",         "High_Level_Variance",         False, "Variance analysis"),
+    ("Relief_KD",                   "ITP KD relief",               False, "ITP KD data"),
+    ("Purchase_Price",              "Purchase Price",              False, "Purchase price summary"),
+    ("UP_Calc_Template_Simulation", "UP_Calc_Template_Simulation", False, "UP calculation"),
+    ("NANO_HFM",                    "NANO HFM",                    False, "NANO HFM actuals"),
+    ("ITP",                         "ITP",                         False, "ITP BP25"),
+]
+REQUIRED_KEYS = {k for k, _, req, _ in FILE_META if req}
+ALL_KEYS      = [k for k, _, _, _ in FILE_META]
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  THREAD-SAFE UI LOGGER
+# ═══════════════════════════════════════════════════════════════════════════════
+_TAG_COLOURS = {
+    'phase':   '#cba6f7',
+    'step':    '#7aa2f7',
+    'info':    '#6c7a8d',
+    'ok':      '#a6e3a1',
+    'warn':    '#f9e2af',
+    'error':   '#f38ba8',
+    'success': '#a6e3a1',
+}
+
+def ui_log(message: str, tag: str = 'step'):
+    root.after(0, _do_log, message, tag)
+
+def _do_log(message: str, tag: str):
+    ts = datetime.now().strftime('%H:%M:%S')
+    log_text.configure(state='normal')
+    log_text.insert(tk.END, f'[{ts}] {message}\n', tag)
+    log_text.see(tk.END)
+
+def log_step(message: str, tag: str = 'step'):
+    ui_log(message, tag)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  HARD-STOP helper
+# ═══════════════════════════════════════════════════════════════════════════════
+def _hard_stop(context: str, exc: Exception):
+    tb = traceback.format_exc()
+    ui_log("━" * 60, 'error')
+    ui_log(f"❌  FATAL ERROR in: {context}", 'error')
+    ui_log(f"    {type(exc).__name__}: {exc}", 'error')
+    for line in tb.splitlines():
+        ui_log(f"    {line}", 'error')
+    ui_log("━" * 60, 'error')
+    _stop_event.set()
+    root.after(0, _ui_on_fatal, f"Error in {context}: {type(exc).__name__}: {exc}")
+
+def _ui_on_fatal(msg: str):
+    progress_bar.stop()
+    save_message_label.config(text="❌ Processing stopped – see log for details.", fg="#f38ba8")
+    toggle_buttons(True)
+    logger.error(msg)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  SAFE DataFrame helpers
+# ═══════════════════════════════════════════════════════════════════════════════
+def _empty_df():
+    return pd.DataFrame()
+
+def _safe_read_excel_all_sheets(path, label):
+    if not path or not os.path.isfile(path):
+        ui_log(f"  ↳ SKIP  {label}: file absent – empty data.", 'info')
+        return {}
+    try:
+        ui_log(f"  ↳ READ  {label} …", 'info')
+        sheets = pd.read_excel(path, sheet_name=None, engine="openpyxl")
+        ui_log(f"  ↳ OK    {label}: {len(sheets)} sheet(s) loaded.", 'ok')
+        return sheets
+    except Exception as e:
+        ui_log(f"  ↳ WARN  {label}: read failed ({e}) – empty data.", 'warn')
+        return {}
+
+def _safe_sheet(sheets_dict, sheet_name, label):
+    if not sheets_dict:
+        return _empty_df()
+    if sheet_name in sheets_dict:
+        return sheets_dict[sheet_name]
+    lower_map = {k.lower(): k for k in sheets_dict}
+    if sheet_name.lower() in lower_map:
+        return sheets_dict[lower_map[sheet_name.lower()]]
+    ui_log(f"  ↳ SKIP  {label} / '{sheet_name}' – sheet absent.", 'info')
+    return _empty_df()
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  FILE STATUS PANEL
+# ═══════════════════════════════════════════════════════════════════════════════
+_file_status_vars = {}
+
+def _build_file_status_panel(parent):
+    global _file_status_vars
+    _file_status_vars = {}
+
+    hdr_row = tk.Frame(parent, bg="#1e2533")
+    hdr_row.pack(fill='x', padx=4, pady=(4, 2))
+    for text, w in [("File", 26), ("Status", 7), ("Description", 0)]:
+        kw = {"width": w} if w else {}
+        tk.Label(hdr_row, text=text, bg="#1e2533", fg="#8892a4",
+                 font=("Consolas", 8, "bold"), anchor='w', **kw).pack(
+            side='left', fill='x' if not w else None, expand=not w)
+
+    ttk.Separator(parent, orient='horizontal').pack(fill='x', padx=4, pady=2)
+
+    for key, _, required, desc in FILE_META:
+        row = tk.Frame(parent, bg="#1e2533")
+        row.pack(fill='x', padx=4, pady=1)
+        req_tag = " ★" if required else "  "
+        tk.Label(row, text=f"{req_tag}{key}", bg="#1e2533", fg="#cdd6f4",
+                 font=("Consolas", 8), width=26, anchor='w').pack(side='left')
+        icon_var = tk.StringVar(value=" —  ")
+        lbl_icon = tk.Label(row, textvariable=icon_var, bg="#1e2533",
+                            fg="#6c7a8d", font=("Consolas", 8, "bold"), width=7, anchor='w')
+        lbl_icon.pack(side='left')
+        lbl_desc = tk.Label(row, text=desc, bg="#1e2533", fg="#6c7a8d",
+                            font=("Consolas", 8), anchor='w')
+        lbl_desc.pack(side='left', fill='x', expand=True)
+        _file_status_vars[key] = {"icon_var": icon_var, "icon_lbl": lbl_icon, "desc_lbl": lbl_desc}
+
+    tk.Label(parent, text="  ★ = Required for full output", bg="#1e2533",
+             fg="#6c7a8d", font=("Consolas", 7), anchor='w').pack(anchor='w', padx=6, pady=(4, 2))
+
+def _set_file_status(key, found):
+    if key not in _file_status_vars:
+        return
+    e = _file_status_vars[key]
+    if found:
+        e["icon_var"].set(" ✔  ")
+        e["icon_lbl"].config(fg="#a6e3a1")
+        e["desc_lbl"].config(fg="#a6e3a1")
+    else:
+        colour = "#f38ba8" if key in REQUIRED_KEYS else "#f9e2af"
+        e["icon_var"].set(" ✘  ")
+        e["icon_lbl"].config(fg=colour)
+        e["desc_lbl"].config(fg=colour)
+
+def _reset_file_statuses():
+    for e in _file_status_vars.values():
+        e["icon_var"].set(" —  ")
+        e["icon_lbl"].config(fg="#6c7a8d")
+        e["desc_lbl"].config(fg="#6c7a8d")
+
+def _refresh_file_status_from_folder(folder_path):
+    _reset_file_statuses()
+    if not folder_path or not os.path.isdir(folder_path):
+        _status_summary_var.set("Folder not found")
+        return
+    try:
+        fnames = os.listdir(folder_path)
+    except PermissionError:
+        _status_summary_var.set("Permission denied reading folder")
+        return
+    for key, kw, _, _ in FILE_META:
+        _set_file_status(key, any(kw in f for f in fnames))
+    found_count = sum(1 for _, kw, _, _ in FILE_META if any(kw in f for f in fnames))
+    req_found   = sum(1 for _, kw, req, _ in FILE_META if req and any(kw in f for f in fnames))
+    req_total   = len(REQUIRED_KEYS)
+    _status_summary_var.set(
+        f"Found {found_count}/{len(FILE_META)} files  |  Required: {req_found}/{req_total}")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  FOLDER BROWSE
+# ═══════════════════════════════════════════════════════════════════════════════
+def _browse_into(entry_widget, title, refresh_status=False):
+    path = filedialog.askdirectory(title=title)
+    if path:
+        entry_widget.delete(0, tk.END)
+        entry_widget.insert(0, path)
+        if refresh_status:
+            _refresh_file_status_from_folder(path)
+
+def browse_folder():
+    _browse_into(file_path_entry, "Select Input Folder", refresh_status=True)
+
+def browse_folder_1():
+    _browse_into(output_path_entry, "Select Output Folder", refresh_status=False)
+
+def _on_input_entry_change(*_):
+    _refresh_file_status_from_folder(file_path_entry.get().strip())
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  VALIDATION
+# ═══════════════════════════════════════════════════════════════════════════════
+def validate_inputs():
+    fields = {
+        "Input Folder":     file_path_entry.get().strip(),
+        "Output Folder":    output_path_entry.get().strip(),
+        "FX Converter":     converter_var_entry.get().strip(),
+        "Month":            month_dropdown.get(),
+        "CFMI":             converter_cfmi.get().strip(),
+        "Café Penalty":     cafe_penalty_var.get().strip(),
+        "Connectivity":     connectivity_var.get().strip(),
+        "ePWR Step2":       ePWR_var.get().strip(),
+        "mEUR G&A reclass": converter_mEUR.get().strip(),
+        "bJPY G&A reclass": converter_bJPY.get().strip(),
+        "ITP CBU Nissan":   new_param_1.get().strip(),
+        "ITP CBU Infiniti": new_param_2.get().strip(),
+    }
+    missing = [k for k, v in fields.items() if not v]
+    if month_dropdown.current() == -1 and "Month" not in missing:
+        missing.insert(0, "Month")
+    if missing:
+        messagebox.showerror("Input Error",
+            "The following fields are mandatory:\n• " + "\n• ".join(missing))
+        return False
+    numeric_fields = {
+        "FX Converter":     converter_var_entry.get().strip(),
+        "CFMI":             converter_cfmi.get().strip(),
+        "Café Penalty":     cafe_penalty_var.get().strip(),
+        "Connectivity":     connectivity_var.get().strip(),
+        "ePWR Step2":       ePWR_var.get().strip(),
+        "mEUR G&A reclass": converter_mEUR.get().strip(),
+        "bJPY G&A reclass": converter_bJPY.get().strip(),
+        "ITP CBU Nissan":   new_param_1.get().strip(),
+        "ITP CBU Infiniti": new_param_2.get().strip(),
+    }
+    bad = [n for n, v in numeric_fields.items() if not _is_float(v)]
+    if bad:
+        messagebox.showerror("Invalid Numbers",
+            "These fields must be numeric:\n• " + "\n• ".join(bad))
+        return False
+    return True
+
+def _is_float(s):
+    try:
+        float(s); return True
+    except ValueError:
+        return False
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  FISCAL YEAR
+# ═══════════════════════════════════════════════════════════════════════════════
+def determine_fiscal_year(selected_month):
+    y = time.localtime().tm_year
+    return y - 1 if selected_month < 4 else y
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  CURRENCY CONVERTER UPDATE
+# ═══════════════════════════════════════════════════════════════════════════════
+def update_excel_converter():
+    file_path = os.path.join(base_dir, 'Mandatory_folder', 'currency_converter.xlsx')
+    if not os.path.isfile(file_path):
+        ui_log("[SKIP] currency_converter.xlsx not found – FX update skipped.", 'warn')
+        return
+    try:
+        months = ["Jan","Feb","Mar","Apr","May","Jun",
+                  "Jul","Aug","Sep","Oct","Nov","Dec"]
+        month_index = month_dropdown.current()
+        user_input  = converter_var_entry.get().strip()
+        df = pd.read_excel(file_path)
+        df.at[0, months[month_index]] = float(user_input)
+        df.to_excel(file_path, index=False)
+        ui_log("Currency converter file updated.", 'ok')
+    except PermissionError:
+        raise RuntimeError("Cannot write currency_converter.xlsx – please close it first.")
+    except Exception as e:
+        ui_log(f"[WARN] Converter update skipped: {e}", 'warn')
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  COPY HELPERS
+# ═══════════════════════════════════════════════════════════════════════════════
+def copy_excel_file(source_path, dest_folder):
+    if not os.path.isfile(source_path):
+        raise FileNotFoundError(f"Source not found: {source_path}")
+    os.makedirs(dest_folder, exist_ok=True)
+    base_name, ext = os.path.splitext(os.path.basename(source_path))
+    dest = os.path.join(dest_folder, os.path.basename(source_path))
+    counter = 1
+    while os.path.exists(dest):
+        dest = os.path.join(dest_folder, f"{base_name}_{counter}{ext}")
+        counter += 1
+    shutil.copy2(source_path, dest)
+    ui_log(f"  ↳ Copied → {os.path.basename(dest)}", 'info')
+    return dest
+
+def copy_master_sheet(src_path, dest_path, password):
+    if not src_path or not os.path.isfile(src_path):
+        ui_log("  ↳ SKIP  Master sheet: OSP Calc Tool absent.", 'info')
+        return
+    try:
+        ui_log("  ↳ Copying Master sheet from OSP Calc Tool …", 'info')
+        df = pd.read_excel(src_path, sheet_name='Master', engine='openpyxl')
+        wb = openpyxl.load_workbook(dest_path, keep_links=True)
+        from openpyxl.workbook.protection import WorkbookProtection
+        wb.security = WorkbookProtection(workbookPassword=password, lockStructure=True)
+        if 'Master' in wb.sheetnames:
+            del wb['Master']
+        ws = wb.create_sheet(title='Master')
+        for c, col in enumerate(df.columns, 1):
+            ws.cell(row=1, column=c, value=col)
+        for r, row in df.iterrows():
+            for c, val in enumerate(row, 1):
+                ws.cell(row=r + 2, column=c, value=val)
+        wb.save(dest_path)
+        ui_log("  ↳ OK    Master sheet written.", 'ok')
+    except KeyError:
+        ui_log("  ↳ SKIP  'Master' sheet not found in OSP Calc Tool.", 'warn')
+    except Exception as e:
+        ui_log(f"  ↳ WARN  Master sheet copy failed ({e}) – continuing.", 'warn')
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ENCRYPTED-XLSX READER
+# ═══════════════════════════════════════════════════════════════════════════════
+def read_xlsx_openpyxl(path, sheet_name=None, password=None, return_all_sheets=False):
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"Excel file not found: {path}")
+    ext = os.path.splitext(path)[1].lower()
+    if ext not in ('.xlsx', '.xlsm'):
+        raise ValueError(f"Unsupported format: {ext}")
+    if isinstance(sheet_name, str):
+        sheet_name = sheet_name.replace("&amp;", "&")
+    with open(path, "rb") as f:
+        office_file = msoffcrypto.OfficeFile(f)
+        encrypted = getattr(office_file, "is_encrypted", False)
+        if encrypted:
+            if not password:
+                raise ValueError("Workbook is encrypted – provide a password.")
+            buf = io.BytesIO()
+            office_file.load_key(password=password)
+            office_file.decrypt(buf)
+            buf.seek(0)
+            return pd.read_excel(buf,
+                sheet_name=None if return_all_sheets else sheet_name,
+                engine='openpyxl')
+    return pd.read_excel(path,
+        sheet_name=None if return_all_sheets else sheet_name,
+        engine='openpyxl')
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  SUBMIT / RUN ORCHESTRATION
+# ═══════════════════════════════════════════════════════════════════════════════
+def submit_action_2():
+    selected_month = month_dropdown.get()
+    if not messagebox.askokcancel("Data Check",
+            f"Please ensure HFM {selected_month} data is fully populated before running."):
+        return
+    if not validate_inputs():
+        return
+
+    folder_path = file_path_entry.get().strip()
+    missing_req = []
+    if folder_path and os.path.isdir(folder_path):
+        fnames = os.listdir(folder_path)
+        for key, kw, req, _ in FILE_META:
+            if req and not any(kw in f for f in fnames):
+                missing_req.append(key)
+
+    if missing_req:
+        if not messagebox.askokcancel("Missing Required Files",
+                "These REQUIRED files were not found:\n\n"
+                + "\n".join(f"  ✘  {k}" for k in missing_req)
+                + "\n\nOutput may be incomplete. Continue anyway?"):
+            return
+
+    log_text.configure(state='normal')
+    log_text.delete('1.0', tk.END)
+
+    toggle_buttons(False)
+    _stop_event.clear()
+    progress_bar.pack(fill='x', pady=(0, 2))
+    progress_bar.start()
+    save_message_label.config(text="Processing… Please wait.", fg="#cba6f7")
+
+    threading.Thread(target=update_elapsed_time, daemon=True).start()
+    threading.Thread(target=_run_pipeline, daemon=True).start()
+
+    ui_log("═" * 55, 'phase')
+    ui_log("  STARTED  –  P&L and New KPI Actuals Generation", 'phase')
+    ui_log("═" * 55, 'phase')
+
+def _run_pipeline():
+    try:
+        _phase("PHASE 1 / 4  –  Currency Converter Update")
+        update_excel_converter()
+    except Exception as e:
+        _hard_stop("Currency Converter Update", e)
+        return
+    perform_calculation_2()
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  MAIN CALCULATION
+# ═══════════════════════════════════════════════════════════════════════════════
+def _phase(label):
+    ui_log("", 'info')
+    ui_log(f"▶  {label}", 'phase')
+
+def perform_calculation_2():
+    start_time = time.time()
+
+    try:
+        _phase("PHASE 2 / 4  –  Reading Parameters")
+        folder_path    = file_path_entry.get().strip()
+        output_path    = output_path_entry.get().strip()
+        selected_month = month_dropdown.current() + 1
+
+        var_ePWR           = float(ePWR_var.get())
+        var_cfmi           = -(float(converter_cfmi.get())) / 1e6
+        var_converter      = float(converter_var_entry.get())
+        var_connectivity   = -(float(connectivity_var.get())) / 1e6
+        var_cafe_penalty   = float(cafe_penalty_var.get())
+        var_converter_bJPY = converter_bJPY.get().strip()
+        var_converter_mEUR = converter_mEUR.get().strip()
+        var_new_param_1    = float(new_param_1.get().strip())
+        var_new_param_2    = float(new_param_2.get().strip())
+
+        ui_log(f"  Month           : {month_dropdown.get()}  (index {selected_month})", 'info')
+        ui_log(f"  FX Converter    : {var_converter}", 'info')
+        ui_log(f"  CFMI            : {var_cfmi:.8f}", 'info')
+        ui_log(f"  ePWR Step2      : {var_ePWR}", 'info')
+        ui_log(f"  Connectivity    : {var_connectivity:.8f}", 'info')
+        ui_log(f"  Café Penalty    : {var_cafe_penalty}", 'info')
+        ui_log(f"  bJPY G&A        : {var_converter_bJPY}", 'info')
+        ui_log(f"  mEUR G&A        : {var_converter_mEUR}", 'info')
+        ui_log(f"  ITP CBU Nissan  : {var_new_param_1}", 'info')
+        ui_log(f"  ITP CBU Infiniti: {var_new_param_2}", 'info')
+        ui_log(f"  Input folder    : {folder_path}", 'info')
+        ui_log(f"  Output folder   : {output_path}", 'info')
+    except Exception as e:
+        _hard_stop("Reading Parameters", e)
+        return
+
+    try:
+        _phase("PHASE 2b / 4  –  Resolving Template Paths")
+        now      = datetime.now()
+        fy_start = now.year if now.month >= 4 else now.year - 1
+        financial_year = f"{fy_start}-{str(fy_start+1)[-2:]}"
+        mand = os.path.join(base_dir, 'Mandatory_folder')
+
+        if selected_month == 4:
+            file_path_template          = os.path.join(mand, 'FY25_P_L_Summary_March_template.xlsx')
+            file_path_template_1        = os.path.join(mand, 'New_KPI_P&L_FY25_Actual_New_OSP_template.xlsx')
+            file_path_template_man_1    = file_path_template_1
+            file_path_template_man      = file_path_template
+            file_path_goodwill_template = os.path.join(mand, 'Goodwill_template.xlsx')
+        else:
+            prev_month_name             = month_dropdown['values'][month_dropdown.current() - 1]
+            file_path_template_man_1    = os.path.join(mand, 'New_KPI_P&L_FY25_Actual_New_OSP_template.xlsx')
+            file_path_template_man      = os.path.join(mand, 'FY25_P_L_Summary_March_template.xlsx')
+            file_path_template          = file_path_template_man
+            file_path_template_1        = file_path_template_man_1
+            file_path_goodwill_template = os.path.join(
+                base_dir, 'Goodwill_files',
+                f'Goodwill_{prev_month_name}_output_FY{financial_year}.xlsx')
+
+        for tname, tpath in [
+            ("P&L template",      file_path_template),
+            ("KPI template",      file_path_template_1),
+            ("Goodwill template", file_path_goodwill_template),
+        ]:
+            exists = os.path.isfile(tpath)
+            ui_log(f"  {'✔' if exists else '✘'}  {tname}: {os.path.basename(tpath)}",
+                   'ok' if exists else 'warn')
+    except Exception as e:
+        _hard_stop("Resolving Template Paths", e)
+        return
+
+    try:
+        _phase("PHASE 3 / 4  –  Scanning Input Folder")
+        file_paths = {k: None for k in ALL_KEYS}
+        keyword_map = {k: kw for k, kw, _, _ in FILE_META}
+
+        if folder_path and os.path.isdir(folder_path):
+            for fname in os.listdir(folder_path):
+                for key, kw in keyword_map.items():
+                    if kw in fname and file_paths[key] is None:
+                        file_paths[key] = os.path.join(folder_path, fname)
+                        ui_log(f"  ✔  Found  [{key}]  →  {fname}", 'ok')
+        else:
+            ui_log("  ✘  Input folder not accessible – all sources will be empty.", 'warn')
+
+        for k, v in file_paths.items():
+            if v is None:
+                marker = "[REQUIRED]" if k in REQUIRED_KEYS else "[optional]"
+                ui_log(f"  –  Missing {marker} {k}  →  empty DataFrame",
+                       'warn' if k in REQUIRED_KEYS else 'info')
+
+        for key in ALL_KEYS:
+            root.after(0, _set_file_status, key, file_paths[key] is not None)
+    except Exception as e:
+        _hard_stop("Scanning Input Folder", e)
+        return
+
+    if _stop_event.is_set():
+        root.after(0, _ui_cancelled)
+        return
+
+    try:
+        _phase("PHASE 3b / 4  –  Preparing Working Copy")
+        temp_dir = os.path.join(base_dir, 'Temp_files')
+        if file_paths["P&L Summary"] and os.path.isfile(file_paths["P&L Summary"]):
+            ui_log("  Copying P&L Summary to Temp_files …", 'info')
+            copied_path = copy_excel_file(file_paths["P&L Summary"], temp_dir)
+            if not copied_path:
+                ui_log("  Copy failed – falling back to template.", 'warn')
+                copied_path = file_path_template
+        else:
+            ui_log("  P&L Summary absent – using mandatory template as base.", 'warn')
+            copied_path = file_path_template
+
+        copy_master_sheet(file_paths["OSP Calc Tool"], copied_path, "jeanluc")
+    except Exception as e:
+        _hard_stop("Preparing Working Copy", e)
+        return
+
+    try:
+        _phase("PHASE 3c / 4  –  Loading DataFrames")
+
+        def _load(key): return _safe_read_excel_all_sheets(file_paths[key], key)
+
+        pl_summary_sheets     = _load("P&L Summary")
+        hq_items_sheets       = _load("HQ items")
+        osp_calc_sheets       = _load("OSP Calc Tool")
+        hfm_mgr_sheets        = _load("HFM Managerial P&L")
+        new_kpi_sheets        = _load("New KPI P&L")
+        goodwill_sheets       = _load("Goodwill")
+        osp_tgk_sheets        = _load("OSP TGK")
+        high_level_var_sheets = _load("High_Level_Variance")
+        relief_kd_sheets      = _load("Relief_KD")
+        purchase_price_sheets = _load("Purchase_Price")
+        up_calc_sheets        = _load("UP_Calc_Template_Simulation")
+        nano_hfm_sheets       = _load("NANO_HFM")
+        itp_sheets            = _load("ITP")
+
+        ui_log("  Extracting individual sheets …", 'info')
+
+        def _sh(d, sn, lbl): return _safe_sheet(d, sn, lbl)
+
+        df_p_l_rop_ne   = _sh(pl_summary_sheets,     'ROP NE (Tagetik)',   "P&L Summary")
+        df_p_l_hq       = _sh(pl_summary_sheets,     'HQ Tagetik',         "P&L Summary")
+        df_mz_conso     = _sh(pl_summary_sheets,     'MZ conso TGK',       "P&L Summary")
+        df_r_and_d      = _sh(pl_summary_sheets,     'R&D',                "P&L Summary")
+        df_p_l_new_kpi  = _sh(pl_summary_sheets,     'New KPI Actual',     "P&L Summary")
+        df_p_l_relief   = _sh(pl_summary_sheets,     'Relief',             "P&L Summary")
+        df_p_l_pl       = _sh(pl_summary_sheets,     'P&L Actual',         "P&L Summary")
+        df_p_l_reclass  = _sh(pl_summary_sheets,     'Reclass',            "P&L Summary")
+        df_p_l_mccp     = _sh(pl_summary_sheets,     'MCPP',               "P&L Summary")
+        df_p_l_ocs      = _sh(pl_summary_sheets,     'OCS details',        "P&L Summary")
+        df_hq_items     = _sh(hq_items_sheets,       '2026 MTD',           "HQ items")
+        df_osp          = _sh(osp_calc_sheets,       'Master',             "OSP Calc Tool")
+        df_hmf_mgr      = _sh(hfm_mgr_sheets,        'Managerial',         "HFM Managerial P&L")
+        df_new_kpi_cfmi = _sh(new_kpi_sheets,        'CFMI',               "New KPI P&L")
+        df_act          = _sh(new_kpi_sheets,        'Act',                "New KPI P&L")
+        df_new_goodwill = _sh(goodwill_sheets,       'GW Budget',          "Goodwill")
+        df_1c_osp       = _sh(osp_tgk_sheets,        'Summary',            "OSP TGK")
+        df_hi_var       = _sh(high_level_var_sheets, 'RS',                 "High_Level_Variance")
+        df_relief_kd    = _sh(relief_kd_sheets,      'Actuals vs FY25',    "Relief_KD")
+        df_purchase     = _sh(purchase_price_sheets, 'Summary pivot',      "Purchase_Price")
+        df_up_calc      = _sh(up_calc_sheets,        'UP_Calculation',     "UP_Calc_Template_Simulation")
+        df_nano_hfm     = _sh(nano_hfm_sheets,       'Actual',             "NANO_HFM")
+        df_itp          = _sh(itp_sheets,            'vs FC2+10(FY25)',    "ITP")
+
+        ui_log("  All DataFrames ready.", 'ok')
+    except Exception as e:
+        _hard_stop("Loading DataFrames", e)
+        return
+
+    if _stop_event.is_set():
+        root.after(0, _ui_cancelled)
+        return
+
+    _phase("PHASE 4 / 4  –  Running Calculation Engine")
+
+    if not _HAS_SUBMIT2:
+        ui_log("  ✘  Submit_2 module not found – engine unavailable.", 'warn')
+        ui_log("  All DataFrames loaded.  Attach Submit_2.py to enable output.", 'warn')
+    else:
+        def _fp(k): return file_paths.get(k) or ""
+
+        file_path_template_run   = copied_path
+        file_path_template_1_run = file_paths["New KPI P&L"] or file_path_template_1
+
+        try:
+            ui_log("  Calling calculate_alternate_value_1 …", 'info')
+            calculate_alternate_value_1(
+                _fp("P&L Summary"),
+                df_p_l_rop_ne, df_p_l_hq,
+                _fp("OSP Calc Tool"), df_osp,
+                _fp("HFM Managerial P&L"), df_hmf_mgr,
+                _fp("New KPI P&L"), df_p_l_new_kpi,
+                _fp("HQ items"), df_hq_items,
+                _fp("Goodwill"),
+                df_r_and_d, df_mz_conso, df_p_l_relief, df_p_l_pl,
+                df_p_l_reclass, df_p_l_mccp, df_p_l_ocs,
+                df_new_kpi_cfmi, df_new_goodwill, df_act,
+                _fp("OSP TGK"), df_1c_osp,
+                _fp("High_Level_Variance"), df_hi_var,
+                _fp("Relief_KD"), df_relief_kd,
+                _fp("Purchase_Price"), df_purchase,
+                _fp("UP_Calc_Template_Simulation"), df_up_calc,
+                _fp("NANO_HFM"), df_nano_hfm,
+                _fp("ITP"), df_itp,
+                file_path_template_run, file_path_template_1_run,
+                selected_month, var_converter, var_cfmi,
+                var_ePWR, var_connectivity, var_cafe_penalty,
+                file_path_template_man_1, file_path_template_man,
+                file_path_goodwill_template, output_path,
+                var_converter_bJPY, var_converter_mEUR, selected_month,
+                var_new_param_1, var_new_param_2
+            )
+            ui_log("  Engine returned successfully.", 'ok')
+        except Exception as e:
+            _hard_stop("Calculation Engine (calculate_alternate_value_1)", e)
+            return
+
+    _stop_event.set()
+    elapsed = time.time() - start_time
+    m, s = divmod(int(elapsed), 60)
+    fmt = f"{m:02d}:{s:02d}"
+
+    ui_log("", 'info')
+    ui_log("═" * 55, 'ok')
+    ui_log(f"  ✔  COMPLETED  –  {fmt} (mm:ss)", 'ok')
+    ui_log("═" * 55, 'ok')
+
+    root.after(0, _ui_done, fmt)
+
+def _ui_done(fmt_time):
+    progress_bar.stop()
+    save_message_label.config(
+        text=f"✔  Done! Files saved to output folder. Time: {fmt_time} (mm:ss).",
+        fg="#a6e3a1")
+    toggle_buttons(True)
+
+def _ui_cancelled():
+    progress_bar.stop()
+    save_message_label.config(text="Operation cancelled.", fg="#f9e2af")
+    toggle_buttons(True)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ELAPSED TIME TICKER
+# ═══════════════════════════════════════════════════════════════════════════════
+def update_elapsed_time():
+    start = time.time()
+    while not _stop_event.is_set():
+        secs = int(time.time() - start)
+        m, s = divmod(secs, 60)
+        root.after(0, elapsed_time_label.config, {"text": f"Elapsed: {m:02d}:{s:02d}"})
+        time.sleep(0.5)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  LOAD CONVERTER ON MONTH SELECT
+# ═══════════════════════════════════════════════════════════════════════════════
+def load_converter_data(_event=None):
+    try:
+        fp = os.path.join(base_dir, 'Mandatory_folder', 'currency_converter.xlsx')
+        _clear_numeric_entries()
+        if not os.path.isfile(fp):
+            messagebox.showinfo("Converter Data",
+                "currency_converter.xlsx not found.\nEnter FX rate manually.")
+            return
+        df  = pd.read_excel(fp)
+        idx = month_dropdown.current() + 1
+        val = df.iloc[0, idx]
+        if pd.notna(val):
+            converter_var_entry.insert(0, val)
+            messagebox.showinfo("Converter Data",
+                f"Pre-loaded FX rate for {month_dropdown.get()} ({df.iloc[0, 0]}).\nPlease verify.")
+        else:
+            messagebox.showinfo("Converter Data",
+                f"No FX rate stored for {month_dropdown.get()}.\nEnter manually.")
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to load converter data: {e}")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  UI HELPERS
+# ═══════════════════════════════════════════════════════════════════════════════
+def _clear_numeric_entries():
+    for w in (converter_var_entry, cafe_penalty_var, connectivity_var,
+              converter_cfmi, ePWR_var, converter_bJPY, converter_mEUR,
+              new_param_1, new_param_2):
+        w.delete(0, tk.END)
+
+def toggle_buttons(enabled):
+    submit_button_2.config(state=tk.NORMAL if enabled else tk.DISABLED)
+    reset_button.config(   state=tk.DISABLED if enabled else tk.NORMAL)
+
+def reset_action():
+    _stop_event.set()
+    progress_bar.stop()
+    elapsed_time_label.config(text="Elapsed: 00:00")
+    save_message_label.config(text="Reset – paths preserved.", fg="#f9e2af")
+    toggle_buttons(True)
+    _clear_numeric_entries()
+    _reset_file_statuses()
+    _status_summary_var.set("Scan to refresh")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  BUILD THE UI
+# ═══════════════════════════════════════════════════════════════════════════════
+BG        = "#11131a"
+BG2       = "#1e2533"
+BG3       = "#252d3d"
+ACCENT    = "#7aa2f7"
+ACCENT2   = "#cba6f7"
+FG        = "#cdd6f4"
+FG_DIM    = "#6c7a8d"
+ENTRY_BG  = "#2a3347"
+FONT_MONO = ("Consolas", 9)
+FONT_UI   = ("Segoe UI", 9)
+
+root = tk.Tk()
+root.title("Europe Functional P&L – Actuals Generation Tool")
+root.geometry("980x860")
+root.minsize(800, 700)
+root.resizable(True, True)
+root.configure(bg=BG)
+
+# ── ttk style ─────────────────────────────────────────────────────────────────
+style = ttk.Style(root)
+style.theme_use('clam')
+style.configure("TProgressbar", troughcolor=BG2, background=ACCENT, thickness=6)
+style.configure("TScrollbar",   troughcolor=BG2, background=BG3)
+style.configure("TSeparator",   background=BG3)
+style.configure("TCombobox",    fieldbackground=ENTRY_BG, background=ENTRY_BG,
+                                foreground=FG, selectbackground=ACCENT)
+style.map("TCombobox", fieldbackground=[("readonly", ENTRY_BG)])
+
+# ── widget factory helpers ────────────────────────────────────────────────────
+def _entry(parent, **kw):
+    return tk.Entry(parent, bg=ENTRY_BG, fg=FG, insertbackground=FG,
+                    relief='flat', font=FONT_MONO, highlightthickness=1,
+                    highlightbackground=BG3, highlightcolor=ACCENT, **kw)
+
+def _label(parent, text, **kw):
+    return tk.Label(parent, text=text,
+                    bg=kw.pop('bg', BG2), fg=kw.pop('fg', FG),
+                    font=kw.pop('font', FONT_UI), **kw)
+
+def _section(parent, title):
+    return tk.LabelFrame(parent, text=f"  {title}  ", bg=BG2, fg=ACCENT,
+                         font=("Segoe UI", 9, "bold"), bd=1, relief='flat',
+                         labelanchor='nw', padx=10, pady=6)
+
+def _btn(parent, text, cmd, bg_col, **kw):
+    return tk.Button(parent, text=text, command=cmd, bg=bg_col, fg='white',
+                     font=("Segoe UI", 9, "bold"), relief='flat', cursor='hand2',
+                     activebackground=bg_col, activeforeground='white',
+                     bd=0, padx=12, pady=5, **kw)
+
+# ── HEADER ────────────────────────────────────────────────────────────────────
+hdr = tk.Frame(root, bg=BG)
+hdr.pack(fill='x', padx=16, pady=(12, 4))
+tk.Label(hdr, text="Europe Functional P&L", bg=BG, fg=FG,
+         font=("Segoe UI", 14, "bold")).pack(side='left')
+tk.Label(hdr, text="  Actuals Generation Tool", bg=BG, fg=FG_DIM,
+         font=("Segoe UI", 10)).pack(side='left')
+ttk.Separator(root, orient='horizontal').pack(fill='x', padx=16, pady=(0, 4))
+
+# ── MAIN SPLIT PANE ───────────────────────────────────────────────────────────
+main_pane = tk.PanedWindow(root, orient='horizontal', bg=BG,
+                           sashwidth=6, sashrelief='flat', sashpad=2)
+main_pane.pack(fill='both', expand=True, padx=10, pady=4)
+
+left_frame  = tk.Frame(main_pane, bg=BG)
+right_frame = tk.Frame(main_pane, bg=BG2, bd=1, relief='flat')
+main_pane.add(left_frame,  minsize=340, width=480, stretch='always')
+main_pane.add(right_frame, minsize=240, width=360, stretch='always')
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  LEFT PANEL – split into top (controls) and bottom (log)
+#  Using grid with two rows so the log always gets its share of space.
+# ══════════════════════════════════════════════════════════════════════════════
+left_frame.rowconfigure(0, weight=0)   # controls – shrink-wrap
+left_frame.rowconfigure(1, weight=1)   # log      – fills remaining space
+left_frame.columnconfigure(0, weight=1)
+
+# ── TOP: all controls packed into this frame ──────────────────────────────────
+controls_frame = tk.Frame(left_frame, bg=BG)
+controls_frame.grid(row=0, column=0, sticky='ew')
+
+# ── Paths section ─────────────────────────────────────────────────────────────
+pf = _section(controls_frame, "Paths")
+pf.pack(fill='x', padx=14, pady=(6, 3))
+
+_label(pf, "Input Folder:", bg=BG2, fg=FG_DIM, font=("Segoe UI", 8)).grid(
+    row=0, column=0, sticky='w')
+file_path_entry = _entry(pf)
+file_path_entry.grid(row=1, column=0, sticky='ew', pady=(2, 5), ipady=3)
+_btn(pf, "Browse…", browse_folder, "#3d5a80").grid(row=1, column=1, padx=(6, 0))
+
+_label(pf, "Output Folder:", bg=BG2, fg=FG_DIM, font=("Segoe UI", 8)).grid(
+    row=2, column=0, sticky='w')
+output_path_entry = _entry(pf)
+output_path_entry.grid(row=3, column=0, sticky='ew', pady=(2, 0), ipady=3)
+_btn(pf, "Browse…", browse_folder_1, "#3d5a80").grid(row=3, column=1, padx=(6, 0))
+pf.columnconfigure(0, weight=1)
+
+file_path_entry.bind("<FocusOut>", _on_input_entry_change)
+file_path_entry.bind("<Return>",   _on_input_entry_change)
+
+# ── Period + Parameters side by side ─────────────────────────────────────────
+mid_row = tk.Frame(controls_frame, bg=BG)
+mid_row.pack(fill='x', padx=14, pady=3)
+mid_row.columnconfigure(0, weight=0)
+mid_row.columnconfigure(1, weight=1)
+
+# Period (left of mid_row)
+mf = _section(mid_row, "Period")
+mf.grid(row=0, column=0, sticky='nsew', padx=(0, 4))
+_label(mf, "Month:", bg=BG2, fg=FG_DIM, font=("Segoe UI", 8)).pack(anchor='w')
+month_var = tk.StringVar()
+month_dropdown = ttk.Combobox(mf, textvariable=month_var, width=13,
+                               state='readonly', font=FONT_UI)
+month_dropdown['values'] = (
+    "January","February","March","April","May","June",
+    "July","August","September","October","November","December")
+month_dropdown.pack(anchor='w', pady=(2, 0))
+month_dropdown.bind("<<ComboboxSelected>>", load_converter_data)
+
+# Parameters (right of mid_row, fills remaining width)
+inp = _section(mid_row, "Parameters")
+inp.grid(row=0, column=1, sticky='nsew')
+LWIDTH = 22
+
+def _param_row(parent, lbl, row):
+    _label(parent, lbl, bg=BG2, fg=FG_DIM, font=("Segoe UI", 8),
+           width=LWIDTH, anchor='w').grid(row=row, column=0, sticky='w', pady=1)
+    e = _entry(parent, width=16)
+    e.grid(row=row, column=1, sticky='ew', pady=1, ipady=2)
+    return e
+
+converter_var_entry = _param_row(inp, "FX Converter (USD/JPY):", 0)
+converter_cfmi      = _param_row(inp, "CFMI (Raw Data):",         1)
+ePWR_var            = _param_row(inp, "ePWR Step2:",              2)
+connectivity_var    = _param_row(inp, "Connectivity Calculation:",3)
+cafe_penalty_var    = _param_row(inp, "Café Penalty:",            4)
+converter_bJPY      = _param_row(inp, "bJPY G&A Reclass:",       5)
+converter_mEUR      = _param_row(inp, "mEUR G&A Reclass:",       6)
+new_param_1         = _param_row(inp, "ITP CBU Nissan:",          7)
+new_param_2         = _param_row(inp, "ITP CBU Infiniti:",        8)
+inp.columnconfigure(1, weight=1)
+
+# ── Action buttons ────────────────────────────────────────────────────────────
+bf = tk.Frame(controls_frame, bg=BG)
+bf.pack(padx=14, pady=(4, 3), anchor='w')
+
+submit_button_2 = _btn(bf, "▶  Generate P&L and New KPI Actuals", submit_action_2, "#4c6ef5")
+submit_button_2.pack(side='left', padx=(0, 6))
+reset_button = _btn(bf, "↺  Reset", reset_action, "#e67e22")
+reset_button.pack(side='left', padx=(0, 6))
+_btn(bf, "✕  Quit", root.destroy, "#e74c3c").pack(side='left')
+
+# ── Progress / status ─────────────────────────────────────────────────────────
+prog_frame = tk.Frame(controls_frame, bg=BG)
+prog_frame.pack(fill='x', padx=14, pady=(0, 3))
+
+progress_bar = ttk.Progressbar(prog_frame, mode='indeterminate')
+# packed dynamically when run starts
+
+status_row = tk.Frame(prog_frame, bg=BG)
+status_row.pack(fill='x')
+
+elapsed_time_label = tk.Label(status_row, text="Elapsed: 00:00",
+                               bg=BG, fg=FG_DIM, font=FONT_MONO)
+elapsed_time_label.pack(side='left')
+
+save_message_label = tk.Label(status_row, text="", bg=BG, fg=FG,
+                               font=("Segoe UI", 9), wraplength=400, anchor='w')
+save_message_label.pack(side='left', padx=(10, 0), fill='x', expand=True)
+
+# ── BOTTOM: Log area – always visible, fills remaining height ─────────────────
+log_outer = tk.Frame(left_frame, bg=BG)
+log_outer.grid(row=1, column=0, sticky='nsew', padx=14, pady=(0, 10))
+log_outer.rowconfigure(0, weight=1)
+log_outer.columnconfigure(0, weight=1)
+
+lf = tk.LabelFrame(log_outer, text="  Process Log  ", bg=BG2, fg=ACCENT,
+                   font=("Segoe UI", 9, "bold"), bd=1, relief='flat',
+                   labelanchor='nw', padx=4, pady=4)
+lf.grid(row=0, column=0, sticky='nsew')
+lf.rowconfigure(0, weight=1)
+lf.columnconfigure(0, weight=1)
+
+log_text = tk.Text(lf, bg="#0d0f17", fg=FG, insertbackground=FG,
+                   font=FONT_MONO, wrap='word', relief='flat',
+                   height=10, state='normal')
+log_scroll = ttk.Scrollbar(lf, command=log_text.yview)
+log_text.configure(yscrollcommand=log_scroll.set)
+log_text.grid(row=0, column=0, sticky='nsew')
+log_scroll.grid(row=0, column=1, sticky='ns')
+
+for tag, colour in _TAG_COLOURS.items():
+    log_text.tag_config(tag, foreground=colour)
+
+# ══════════════ RIGHT ═════════════════════════════════════════════════════════
+tk.Label(right_frame, text="  File Status", bg=BG2, fg=ACCENT,
+         font=("Segoe UI", 10, "bold"), anchor='w').pack(fill='x', padx=6, pady=(8, 2))
+
+ttk.Separator(right_frame, orient='horizontal').pack(fill='x', padx=6)
+
+_status_summary_var = tk.StringVar(value="No folder selected")
+tk.Label(right_frame, textvariable=_status_summary_var, bg=BG2, fg=ACCENT2,
+         font=("Consolas", 8), anchor='w').pack(fill='x', padx=8, pady=(4, 2))
+
+ttk.Separator(right_frame, orient='horizontal').pack(fill='x', padx=6, pady=2)
+
+_build_file_status_panel(right_frame)
+
+ttk.Separator(right_frame, orient='horizontal').pack(fill='x', padx=6, side='bottom')
+leg = tk.Frame(right_frame, bg=BG2)
+leg.pack(fill='x', padx=8, pady=6, side='bottom')
+for colour, label in [
+    ("#a6e3a1", "Found"),
+    ("#f38ba8", "Missing (Required)"),
+    ("#f9e2af", "Missing (Optional)"),
+    ("#6c7a8d", "Not yet scanned"),
+]:
+    r = tk.Frame(leg, bg=BG2)
+    r.pack(anchor='w')
+    tk.Label(r, text="■ ", bg=BG2, fg=colour, font=("Consolas", 8)).pack(side='left')
+    tk.Label(r, text=label, bg=BG2, fg=FG_DIM, font=("Consolas", 8)).pack(side='left')
+
+_btn(right_frame, "⟳  Scan Input Folder",
+     lambda: _refresh_file_status_from_folder(file_path_entry.get().strip()),
+     "#3d5a80").pack(padx=10, pady=(6, 4), side='bottom')
+
+# ─────────────────────────────────────────────────────────────────────────────
+root.mainloop()
