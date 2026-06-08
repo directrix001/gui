@@ -42,17 +42,21 @@ _stop_event = threading.Event()
 FILE_META = [
     ("P&L Summary",                 "P&L Summary",                 True,  "Main P&L data source"),
     ("OSP Calc Tool",               "OSP Calc Tool",               False, "OSP Calc Tool data"),
-    ("HFM Managerial P&L",          "HFM Managerial P&L",          False,  "HFM managerial data"),
+    ("HFM Managerial P&L",          "HFM Managerial P&L",          False, "HFM managerial data"),
     ("New KPI P&L",                 "New KPI P&L",                 True,  "New KPI actuals"),
     ("HQ items",                    "HQ items",                    False, "HQ Tagetik items"),
     ("Goodwill",                    "Goodwill",                    False, "Goodwill budget"),
     ("OSP TGK",                     "OSP TGK 1C",                  False, "OSP Tagetik summary"),
     ("High_Level_Variance",         "High_Level_Variance",         False, "ACT RS High_Level_Variance"),
     ("Relief_KD",                   "ITP KD relief",               False, "KD Relief Actuals"),
-    ("Purchase_Price",              "Purchase Price",              False, "Purchase price VIN level"),
+    ("Purchase_Price",              "Purchase Price",               False, "Purchase price VIN level"),
     ("UP_Calc_Template_Simulation", "UP_Calc_Template_Simulation", False, "UP calculation"),
     ("NANO_HFM",                    "NANO HFM",                    False, "NANO HFM actuals"),
-    ("ITP",                         "ITP",                         False, "ITP Export"),
+    # FIX: keyword changed from "ITP" (too broad, matched any file containing "ITP")
+    #      to "ITP impact_Export" which uniquely identifies the ITP export file
+    #      (e.g. "ITP impact_Export_April26 v2", "ITP impact_Export_May26 v2", etc.)
+    #      and remains generic across fiscal years and version numbers.
+    ("ITP",                         "ITP impact_Export",           False, "ITP Export"),
 ]
 REQUIRED_KEYS = {k for k, _, req, _ in FILE_META if req}
 ALL_KEYS      = [k for k, _, _, _ in FILE_META]
@@ -806,14 +810,12 @@ main_pane.add(left_frame,  minsize=340, width=480, stretch='always')
 main_pane.add(right_frame, minsize=240, width=360, stretch='always')
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  LEFT PANEL – split into top (controls) and bottom (log)
-#  Using grid with two rows so the log always gets its share of space.
+#  LEFT PANEL
 # ══════════════════════════════════════════════════════════════════════════════
-left_frame.rowconfigure(0, weight=0)   # controls – shrink-wrap
-left_frame.rowconfigure(1, weight=1)   # log      – fills remaining space
+left_frame.rowconfigure(0, weight=0)
+left_frame.rowconfigure(1, weight=1)
 left_frame.columnconfigure(0, weight=1)
 
-# ── TOP: all controls packed into this frame ──────────────────────────────────
 controls_frame = tk.Frame(left_frame, bg=BG)
 controls_frame.grid(row=0, column=0, sticky='ew')
 
@@ -843,7 +845,6 @@ mid_row.pack(fill='x', padx=14, pady=3)
 mid_row.columnconfigure(0, weight=0)
 mid_row.columnconfigure(1, weight=1)
 
-# Period (left of mid_row)
 mf = _section(mid_row, "Period")
 mf.grid(row=0, column=0, sticky='nsew', padx=(0, 4))
 _label(mf, "Month:", bg=BG2, fg=FG_DIM, font=("Segoe UI", 8)).pack(anchor='w')
@@ -856,7 +857,6 @@ month_dropdown['values'] = (
 month_dropdown.pack(anchor='w', pady=(2, 0))
 month_dropdown.bind("<<ComboboxSelected>>", load_converter_data)
 
-# Parameters (right of mid_row, fills remaining width)
 inp = _section(mid_row, "Parameters")
 inp.grid(row=0, column=1, sticky='nsew')
 LWIDTH = 22
@@ -894,7 +894,6 @@ prog_frame = tk.Frame(controls_frame, bg=BG)
 prog_frame.pack(fill='x', padx=14, pady=(0, 3))
 
 progress_bar = ttk.Progressbar(prog_frame, mode='indeterminate')
-# packed dynamically when run starts
 
 status_row = tk.Frame(prog_frame, bg=BG)
 status_row.pack(fill='x')
@@ -907,7 +906,7 @@ save_message_label = tk.Label(status_row, text="", bg=BG, fg=FG,
                                font=("Segoe UI", 9), wraplength=400, anchor='w')
 save_message_label.pack(side='left', padx=(10, 0), fill='x', expand=True)
 
-# ── BOTTOM: Log area – always visible, fills remaining height ─────────────────
+# ── Log area ──────────────────────────────────────────────────────────────────
 log_outer = tk.Frame(left_frame, bg=BG)
 log_outer.grid(row=1, column=0, sticky='nsew', padx=14, pady=(0, 10))
 log_outer.rowconfigure(0, weight=1)
@@ -931,7 +930,7 @@ log_scroll.grid(row=0, column=1, sticky='ns')
 for tag, colour in _TAG_COLOURS.items():
     log_text.tag_config(tag, foreground=colour)
 
-# ══════════════ RIGHT ═════════════════════════════════════════════════════════
+# ══════════════ RIGHT PANEL ═══════════════════════════════════════════════════
 tk.Label(right_frame, text="  File Status", bg=BG2, fg=ACCENT,
          font=("Segoe UI", 10, "bold"), anchor='w').pack(fill='x', padx=6, pady=(8, 2))
 
