@@ -1,10 +1,10 @@
 """
-Nissan Variance Analysis Tool
+Nissan Variance Analysis Tool  —  v3.0
+Single output file:  master file + MTD/YTD template tabs for every selected pair.
 """
 
 import os
 import sys
-import shutil
 import threading
 import time
 import json
@@ -46,13 +46,13 @@ SCENARIOS = [
     "Budget", "LY Actuals"
 ]
 
-QUARTERS = ["Q1 (Apr–Jun)", "Q2 (Jul–Sep)", "Q3 (Oct–Dec)", "Q4 (Jan–Mar)"]
+QUARTERS = ["Q1 (Apr-Jun)", "Q2 (Jul-Sep)", "Q3 (Oct-Dec)", "Q4 (Jan-Mar)"]
 
 MONTHS_BY_Q = {
-    "Q1 (Apr–Jun)": ["April", "May", "June"],
-    "Q2 (Jul–Sep)": ["July", "August", "September"],
-    "Q3 (Oct–Dec)": ["October", "November", "December"],
-    "Q4 (Jan–Mar)": ["January", "February", "March"],
+    "Q1 (Apr-Jun)": ["April", "May", "June"],
+    "Q2 (Jul-Sep)": ["July", "August", "September"],
+    "Q3 (Oct-Dec)": ["October", "November", "December"],
+    "Q4 (Jan-Mar)": ["January", "February", "March"],
 }
 
 REQUIRED_FILES = [
@@ -61,7 +61,7 @@ REQUIRED_FILES = [
     "Actuals_Upload.xlsx", "Variance_Master.xlsx",
 ]
 
-PAIRS_FILE = "scenario_pairs.json"   # persisted scenario pairs
+PAIRS_FILE = "scenario_pairs.json"
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -70,15 +70,15 @@ PAIRS_FILE = "scenario_pairs.json"   # persisted scenario pairs
 def draw_nissan_logo(canvas, cx, cy, scale=1.0):
     rw, rh = int(110 * scale), int(34 * scale)
     bw, bh = int(10 * scale), int(54 * scale)
-    canvas.create_oval(cx-rw, cy-rh, cx+rw, cy+rh,
-                       outline=C["silver"], width=int(3*scale), fill="")
-    canvas.create_oval(cx-rw+int(6*scale), cy-rh+int(5*scale),
-                       cx+rw-int(6*scale), cy+rh-int(5*scale),
+    canvas.create_oval(cx - rw, cy - rh, cx + rw, cy + rh,
+                       outline=C["silver"], width=int(3 * scale), fill="")
+    canvas.create_oval(cx - rw + int(6 * scale), cy - rh + int(5 * scale),
+                       cx + rw - int(6 * scale), cy + rh - int(5 * scale),
                        outline=C["silver_dim"], width=1, fill="")
-    canvas.create_rectangle(cx-bw, cy-bh, cx+bw, cy+bh,
+    canvas.create_rectangle(cx - bw, cy - bh, cx + bw, cy + bh,
                             fill=C["nissan_red"], outline=C["red_dark"], width=2)
     canvas.create_text(cx, cy, text="NISSAN",
-                       fill=C["white"], font=("Arial", int(9*scale), "bold"))
+                       fill=C["white"], font=("Arial", int(9 * scale), "bold"))
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -88,8 +88,8 @@ class NissanVarianceApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Nissan  |  Variance Analysis Tool")
-        self.geometry("1100x860")
-        self.minsize(960, 760)
+        self.geometry("1160x900")
+        self.minsize(980, 780)
         self.configure(bg=C["bg_dark"])
         self.resizable(True, True)
 
@@ -98,11 +98,14 @@ class NissanVarianceApp(tk.Tk):
         self.files_found: dict = {}
         self.all_loaded = False
 
-        # Scenario selection (max 2)
+        # Scenario checkboxes — multiple allowed, must be even number for pairing
         self.scenario_vars: dict = {}
-        self._selected_count = 0
 
-        # Stored pairs  {label: (sc1, sc2)}
+        # File paths
+        self.master_file_var   = tk.StringVar(value="")
+        self.template_file_var = tk.StringVar(value="")
+
+        # Stored pairs  {label: [sc1, sc2]}
         self.stored_pairs: dict = {}
         self._load_pairs()
 
@@ -157,10 +160,8 @@ class NissanVarianceApp(tk.Tk):
                   foreground=[("readonly", C["white"])])
 
         for name, bg, fg, hover in [
-            ("Red.TButton",     C["nissan_red"], C["white"],   C["red_glow"]),
-            ("Green.TButton",   C["success"],    C["bg_dark"], "#00E676"),
-            ("Ghost.TButton",   C["bg_input"],   C["silver"],  C["bg_card"]),
-            ("Warning.TButton", C["warning"],    C["bg_dark"], "#FFE033"),
+            ("Red.TButton",   C["nissan_red"], C["white"],   C["red_glow"]),
+            ("Ghost.TButton", C["bg_input"],   C["silver"],  C["bg_card"]),
         ]:
             style.configure(name, background=bg, foreground=fg,
                             font=("Helvetica Neue", 10, "bold"),
@@ -178,19 +179,58 @@ class NissanVarianceApp(tk.Tk):
         self._build_header()
 
         main = tk.Frame(self, bg=C["bg_dark"])
-        main.pack(fill="both", expand=True, padx=20, pady=(0, 16))
+        main.pack(fill="both", expand=True, padx=20, pady=(0, 0))
 
-        left = tk.Frame(main, bg=C["bg_dark"])
-        left.pack(side="left", fill="both", expand=True, padx=(0, 10))
-
+        # Right panel (file manifest)
         right = tk.Frame(main, bg=C["bg_dark"], width=300)
-        right.pack(side="right", fill="y")
+        right.pack(side="right", fill="y", pady=(0, 16))
         right.pack_propagate(False)
 
+        # Left outer: scrollable form + pinned action bar
+        left_outer = tk.Frame(main, bg=C["bg_dark"])
+        left_outer.pack(side="left", fill="both", expand=True, padx=(0, 10))
+
+        # Pinned action bar at bottom (always visible)
+        self._build_action_bar(left_outer)
+
+        # Scrollable canvas for form sections
+        self._scroll_canvas = tk.Canvas(left_outer, bg=C["bg_dark"],
+                                        highlightthickness=0)
+        vbar = ttk.Scrollbar(left_outer, orient="vertical",
+                             command=self._scroll_canvas.yview)
+        self._scroll_canvas.configure(yscrollcommand=vbar.set)
+        vbar.pack(side="right", fill="y")
+        self._scroll_canvas.pack(side="top", fill="both", expand=True)
+
+        left = tk.Frame(self._scroll_canvas, bg=C["bg_dark"])
+        self._canvas_window = self._scroll_canvas.create_window(
+            (0, 0), window=left, anchor="nw"
+        )
+
+        def _on_frame_configure(e):
+            self._scroll_canvas.configure(
+                scrollregion=self._scroll_canvas.bbox("all"))
+
+        def _on_canvas_configure(e):
+            self._scroll_canvas.itemconfig(
+                self._canvas_window, width=e.width)
+
+        left.bind("<Configure>", _on_frame_configure)
+        self._scroll_canvas.bind("<Configure>", _on_canvas_configure)
+
+        def _on_mousewheel(e):
+            self._scroll_canvas.yview_scroll(
+                int(-1 * (e.delta / 120)), "units")
+        self._scroll_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        # Form sections
         self._build_input_section(left)
         self._build_period_section(left)
-        self._build_scenario_section(left)   # ← updated
-        self._build_output_section(left)
+        self._build_scenario_section(left)
+        self._build_master_file_section(left)
+        self._build_template_file_section(left)
+        self._build_output_folder_section(left)
+
         self._build_file_panel(right)
         self._build_statusbar()
 
@@ -213,7 +253,7 @@ class NissanVarianceApp(tk.Tk):
         tk.Label(tf, text="VARIANCE ANALYSIS",
                  bg=C["bg_dark"], fg=C["white"],
                  font=("Georgia", 18, "bold")).pack(anchor="w")
-        tk.Label(tf, text="Financial Planning & Analysis  •  Forecast Control",
+        tk.Label(tf, text="Financial Planning & Analysis  -  Forecast Control",
                  bg=C["bg_dark"], fg=C["silver_dim"],
                  font=("Helvetica Neue", 9)).pack(anchor="w")
 
@@ -237,7 +277,7 @@ class NissanVarianceApp(tk.Tk):
         card.pack(fill="x")
         return card
 
-    # ── INPUT FOLDERS ─────────────────────────
+    # ── 01  INPUT FOLDERS ───────────────────────
     def _build_input_section(self, parent):
         card = self._section(parent, "01  Input Folders")
         card.configure(padx=16, pady=14)
@@ -248,7 +288,7 @@ class NissanVarianceApp(tk.Tk):
                                      insertbackground=C["white"],
                                      relief="flat", font=("Courier", 9), bd=0)
         self.folder_entry.pack(side="left", fill="x", expand=True, ipady=7, ipadx=6)
-        self.folder_entry.insert(0, "Paste folder path or browse…")
+        self.folder_entry.insert(0, "Paste folder path or browse...")
         self.folder_entry.bind("<FocusIn>", self._clear_placeholder)
         ttk.Button(row, text="Browse", style="Ghost.TButton",
                    command=self._browse_folder).pack(side="left", padx=(8, 0))
@@ -265,12 +305,12 @@ class NissanVarianceApp(tk.Tk):
 
         br = tk.Frame(card, bg=C["bg_card"])
         br.pack(fill="x", pady=(8, 0))
-        ttk.Button(br, text="✕  Remove Selected", style="Ghost.TButton",
+        ttk.Button(br, text="x  Remove Selected", style="Ghost.TButton",
                    command=self._remove_folder).pack(side="left")
-        ttk.Button(br, text="⟳  Scan Files", style="Red.TButton",
+        ttk.Button(br, text="Scan Files", style="Red.TButton",
                    command=self._scan_files).pack(side="right")
 
-    # ── PERIOD ────────────────────────────────
+    # ── 02  FINANCIAL PERIOD ────────────────────
     def _build_period_section(self, parent):
         card = self._section(parent, "02  Financial Period")
         card.configure(padx=16, pady=14)
@@ -298,14 +338,11 @@ class NissanVarianceApp(tk.Tk):
                                       font=("Helvetica Neue", 10))
         self.month_cb.pack(fill="x", ipady=4)
 
-    # ══════════════════════════════════════════════════════════════
-    #  SCENARIO SECTION  — max 2 selections + store pairs
-    # ══════════════════════════════════════════════════════════════
+    # ── 03  SCENARIO SECTION ─────────────────────────────────────
     def _build_scenario_section(self, parent):
-        card = self._section(parent, "03  Forecast Scenarios  (select 1 or 2  →  MTD + YTD tabs each)")
+        card = self._section(parent, "03  Forecast Scenarios  (select scenarios in pairs — each pair gets MTD + YTD tabs)")
         card.configure(padx=16, pady=14)
 
-        # ── top: checkboxes ──────────────────────
         top = tk.Frame(card, bg=C["bg_card"])
         top.pack(fill="x")
 
@@ -316,9 +353,9 @@ class NissanVarianceApp(tk.Tk):
         right_col.pack(side="right", fill="y", padx=(16, 0))
         right_col.pack_propagate(False)
 
-        # counter badge
+        # Live pair summary label
         self.sc_counter = tk.Label(left_col,
-                                    text="0 selected  (1 or 2)",
+                                    text="Select an even number of scenarios (2, 4, 6 …)",
                                     bg=C["bg_card"], fg=C["silver_dim"],
                                     font=("Helvetica Neue", 8, "italic"))
         self.sc_counter.pack(anchor="w", pady=(0, 8))
@@ -343,18 +380,16 @@ class NissanVarianceApp(tk.Tk):
             )
             cb.grid(row=i // cols, column=i % cols, sticky="w", padx=4, pady=2)
 
-        # clear btn
         btn_row = tk.Frame(left_col, bg=C["bg_card"])
         btn_row.pack(fill="x", pady=(10, 0))
         ttk.Button(btn_row, text="Clear Selection", style="Ghost.TButton",
                    command=self._clear_scenarios).pack(side="left")
 
-        # ── right col: store pair ──────────────────
+        # Right col: stored pairs
         tk.Label(right_col, text="STORED PAIRS",
                  bg=C["bg_card"], fg=C["silver_dim"],
                  font=("Helvetica Neue", 8, "bold")).pack(anchor="w", pady=(0, 6))
 
-        # pair name entry + store button
         pe_row = tk.Frame(right_col, bg=C["bg_card"])
         pe_row.pack(fill="x", pady=(0, 6))
         self.pair_name_entry = tk.Entry(pe_row, bg=C["bg_input"], fg=C["silver"],
@@ -362,12 +397,11 @@ class NissanVarianceApp(tk.Tk):
                                          relief="flat", font=("Courier", 8), bd=0)
         self.pair_name_entry.pack(side="left", fill="x", expand=True,
                                    ipady=5, ipadx=4)
-        self.pair_name_entry.insert(0, "Pair label…")
+        self.pair_name_entry.insert(0, "Pair label...")
         self.pair_name_entry.bind("<FocusIn>", self._clear_pair_placeholder)
         ttk.Button(pe_row, text="Store", style="Red.TButton",
                    command=self._store_pair).pack(side="left", padx=(6, 0))
 
-        # pairs listbox
         self.pairs_listbox = tk.Listbox(
             right_col, bg=C["bg_input"], fg=C["silver"],
             selectbackground=C["nissan_red"], selectforeground=C["white"],
@@ -384,7 +418,6 @@ class NissanVarianceApp(tk.Tk):
         ttk.Button(pbr, text="Delete", style="Ghost.TButton",
                    command=self._delete_pair).pack(side="left")
 
-        # active pair indicator
         self.active_pair_label = tk.Label(
             right_col, text="No pair active",
             bg=C["bg_card"], fg=C["text_dim"],
@@ -392,9 +425,49 @@ class NissanVarianceApp(tk.Tk):
         )
         self.active_pair_label.pack(anchor="w", pady=(8, 0))
 
-    # ── OUTPUT ────────────────────────────────
-    def _build_output_section(self, parent):
-        card = self._section(parent, "04  Output")
+    # ── 04  MASTER INPUT FILE ────────────────────────────────────
+    def _build_master_file_section(self, parent):
+        card = self._section(parent, "04  Master File  (base output — MTD/YTD tabs will be added here)")
+        card.configure(padx=16, pady=14)
+
+        row = tk.Frame(card, bg=C["bg_card"])
+        row.pack(fill="x")
+        self.master_entry = tk.Entry(row, textvariable=self.master_file_var,
+                                      bg=C["bg_input"], fg=C["silver"],
+                                      insertbackground=C["white"],
+                                      relief="flat", font=("Courier", 9), bd=0)
+        self.master_entry.pack(side="left", fill="x", expand=True, ipady=7, ipadx=6)
+        ttk.Button(row, text="Browse", style="Ghost.TButton",
+                   command=self._browse_master_file).pack(side="left", padx=(8, 0))
+
+        self.master_status = tk.Label(card, text="No master file selected",
+                                       bg=C["bg_card"], fg=C["text_dim"],
+                                       font=("Helvetica Neue", 8, "italic"))
+        self.master_status.pack(anchor="w", pady=(6, 0))
+
+    # ── 05  TEMPLATE FILE ────────────────────────────────────────
+    def _build_template_file_section(self, parent):
+        card = self._section(parent, "05  Template File  (contains the MTD and YTD template sheets)")
+        card.configure(padx=16, pady=14)
+
+        row = tk.Frame(card, bg=C["bg_card"])
+        row.pack(fill="x")
+        self.template_entry = tk.Entry(row, textvariable=self.template_file_var,
+                                        bg=C["bg_input"], fg=C["silver"],
+                                        insertbackground=C["white"],
+                                        relief="flat", font=("Courier", 9), bd=0)
+        self.template_entry.pack(side="left", fill="x", expand=True, ipady=7, ipadx=6)
+        ttk.Button(row, text="Browse", style="Ghost.TButton",
+                   command=self._browse_template_file).pack(side="left", padx=(8, 0))
+
+        self.template_status = tk.Label(card, text="No template file selected",
+                                         bg=C["bg_card"], fg=C["text_dim"],
+                                         font=("Helvetica Neue", 8, "italic"))
+        self.template_status.pack(anchor="w", pady=(6, 0))
+
+    # ── 06  OUTPUT FOLDER + PROGRESS ────────────────────────────
+    def _build_output_folder_section(self, parent):
+        card = self._section(parent, "06  Output Folder")
         card.configure(padx=16, pady=14)
 
         row = tk.Frame(card, bg=C["bg_card"])
@@ -404,7 +477,7 @@ class NissanVarianceApp(tk.Tk):
                                       relief="flat", font=("Courier", 9), bd=0)
         self.output_entry.pack(side="left", fill="x", expand=True,
                                ipady=7, ipadx=6)
-        self.output_entry.insert(0, "Select output folder…")
+        self.output_entry.insert(0, "Select output folder...")
         self.output_entry.bind("<FocusIn>", self._clear_output_placeholder)
         ttk.Button(row, text="Browse", style="Ghost.TButton",
                    command=self._browse_output).pack(side="left", padx=(8, 0))
@@ -417,20 +490,15 @@ class NissanVarianceApp(tk.Tk):
                                         font=("Helvetica Neue", 8))
         self.progress_label.pack(anchor="w")
 
-        # two action buttons side-by-side
-        btn_row = tk.Frame(card, bg=C["bg_card"])
-        btn_row.pack(fill="x", pady=(14, 0))
+    # ── ACTION BAR (pinned — always visible) ─────────────────────
+    def _build_action_bar(self, parent):
+        bar = tk.Frame(parent, bg=C["bg_dark"])
+        bar.pack(side="bottom", fill="x", pady=(8, 16))
+        tk.Frame(bar, bg=C["border"], height=1).pack(fill="x", pady=(0, 10))
 
-        ttk.Button(btn_row, text="⚙   GENERATE OUTPUT FILES",
+        ttk.Button(bar, text="  GENERATE FILE",
                    style="Red.TButton",
-                   command=self._generate_files).pack(side="left", fill="x",
-                                                       expand=True, ipady=4,
-                                                       padx=(0, 8))
-
-        ttk.Button(btn_row, text="▶   RUN ANALYSIS",
-                   style="Green.TButton",
-                   command=self._run_analysis).pack(side="left", fill="x",
-                                                     expand=True, ipady=4)
+                   command=self._generate_file).pack(fill="x", ipady=8)
 
     # ── FILE PANEL (right) ────────────────────
     def _build_file_panel(self, parent):
@@ -469,102 +537,100 @@ class NissanVarianceApp(tk.Tk):
         tk.Label(bar, textvariable=self.status_var,
                  bg=C["bg_panel"], fg=C["text_dim"],
                  font=("Helvetica Neue", 8)).pack(side="left", padx=12, pady=4)
-        tk.Label(bar, text="v2.0  •  Nissan FP&A",
+        tk.Label(bar, text="v3.0  -  Nissan FP&A",
                  bg=C["bg_panel"], fg=C["text_dim"],
                  font=("Helvetica Neue", 8)).pack(side="right", padx=12, pady=4)
 
     # ══════════════════════════════════════════════════════════════
-    #  SCENARIO LOGIC — max 2
+    #  SCENARIO LOGIC
     # ══════════════════════════════════════════════════════════════
-    def _on_scenario_toggle(self, toggled_scenario):
-        selected = [s for s, v in self.scenario_vars.items() if v.get()]
+    def _on_scenario_toggle(self, _=None):
+        selected = self._get_selected_scenarios()
         count = len(selected)
-
-        if count > 2:
-            # Uncheck the one just toggled (enforce max 2)
-            self.scenario_vars[toggled_scenario].set(False)
-            self.status_var.set("Maximum 2 scenarios allowed. Deselect one first.")
-            count = 2
-
-        self._selected_count = count
         if count == 0:
-            colour = C["silver_dim"]
-            label  = "0 selected  (1 or 2)"
-        elif count == 1:
-            colour = C["warning"]
-            label  = f"1 selected  →  2 tabs (MTD + YTD)"
+            self.sc_counter.configure(
+                text="Select an even number of scenarios (2, 4, 6 …)",
+                fg=C["silver_dim"])
+        elif count % 2 != 0:
+            self.sc_counter.configure(
+                text=f"{count} selected — select one more to complete the pair",
+                fg=C["warning"])
         else:
-            colour = C["success"]
-            label  = f"2 selected  →  4 tabs (MTD + YTD each)"
-        self.sc_counter.configure(text=label, fg=colour)
+            pairs = self._build_pairs(selected)
+            summary = "  |  ".join(f"{a} vs {b}" for a, b in pairs)
+            self.sc_counter.configure(
+                text=f"{count // 2} pair(s):  {summary}",
+                fg=C["success"])
 
     def _clear_scenarios(self):
         for v in self.scenario_vars.values():
             v.set(False)
-        self._selected_count = 0
-        self.sc_counter.configure(text="0 selected  (1 or 2)", fg=C["silver_dim"])
+        self.sc_counter.configure(
+            text="Select an even number of scenarios (2, 4, 6 …)",
+            fg=C["silver_dim"])
         self.active_pair_label.configure(text="No pair active", fg=C["text_dim"])
 
     def _get_selected_scenarios(self):
-        return [s for s, v in self.scenario_vars.items() if v.get()]
+        return [s for s in SCENARIOS if self.scenario_vars[s].get()]
+
+    @staticmethod
+    def _build_pairs(selected: list) -> list:
+        """Convert ordered list into consecutive pairs: [A,B,C,D] -> [(A,B),(C,D)]"""
+        return [(selected[i], selected[i + 1]) for i in range(0, len(selected) - 1, 2)]
 
     # ══════════════════════════════════════════════════════════════
     #  PAIR STORE / LOAD / DELETE
     # ══════════════════════════════════════════════════════════════
     def _clear_pair_placeholder(self, _):
-        if self.pair_name_entry.get() == "Pair label…":
+        if self.pair_name_entry.get() == "Pair label...":
             self.pair_name_entry.delete(0, "end")
 
     def _store_pair(self):
         selected = self._get_selected_scenarios()
-        if len(selected) != 2:
-            messagebox.showwarning("Select 2 Scenarios",
-                                   "Please select exactly 2 scenarios before storing a pair.")
+        if len(selected) < 2 or len(selected) % 2 != 0:
+            messagebox.showwarning("Select Even Number",
+                                   "Please select an even number of scenarios before storing.")
             return
         label = self.pair_name_entry.get().strip()
-        if not label or label == "Pair label…":
-            # Auto-generate label
-            label = f"{selected[0]} vs {selected[1]}"
+        if not label or label == "Pair label...":
+            pairs = self._build_pairs(selected)
+            label = "  |  ".join(f"{a} vs {b}" for a, b in pairs)
 
         self.stored_pairs[label] = selected
         self._save_pairs()
         self._refresh_pairs_list()
         self.pair_name_entry.delete(0, "end")
-        self.pair_name_entry.insert(0, "Pair label…")
+        self.pair_name_entry.insert(0, "Pair label...")
         self.active_pair_label.configure(
-            text=f"Stored: {label}\n{selected[0]}  ↔  {selected[1]}",
-            fg=C["success"]
-        )
-        self.status_var.set(f"Pair stored: {label}")
+            text=f"Stored: {label}", fg=C["success"])
+        self.status_var.set(f"Stored: {label}")
 
     def _refresh_pairs_list(self):
         self.pairs_listbox.delete(0, "end")
-        for label in self.stored_pairs:
-            sc1, sc2 = self.stored_pairs[label]
-            self.pairs_listbox.insert("end", f"  {label}  ({sc1} / {sc2})")
+        for label, scenarios in self.stored_pairs.items():
+            pairs = self._build_pairs(scenarios)
+            summary = "  |  ".join(f"{a}/{b}" for a, b in pairs)
+            self.pairs_listbox.insert("end", f"  {label}  ({summary})")
 
     def _on_pair_select(self, _=None):
-        pass  # selection tracked via listbox curselection
+        pass
 
     def _load_pair(self):
         sel = self.pairs_listbox.curselection()
         if not sel:
             messagebox.showinfo("Select a Pair", "Click a stored pair first, then Load.")
             return
-        label = list(self.stored_pairs.keys())[sel[0]]
-        sc1, sc2 = self.stored_pairs[label]
-        # Clear all then set the two
+        label  = list(self.stored_pairs.keys())[sel[0]]
+        scenarios = self.stored_pairs[label]
         for v in self.scenario_vars.values():
             v.set(False)
-        self.scenario_vars[sc1].set(True)
-        self.scenario_vars[sc2].set(True)
-        self._selected_count = 2
-        self.sc_counter.configure(text="2 selected  →  4 tabs (MTD + YTD each)", fg=C["success"])
+        for sc in scenarios:
+            if sc in self.scenario_vars:
+                self.scenario_vars[sc].set(True)
+        self._on_scenario_toggle()
         self.active_pair_label.configure(
-            text=f"Active: {label}\n{sc1}  ↔  {sc2}",
-            fg=C["success"]
-        )
-        self.status_var.set(f"Loaded pair: {label}")
+            text=f"Active: {label}", fg=C["success"])
+        self.status_var.set(f"Loaded: {label}")
 
     def _delete_pair(self):
         sel = self.pairs_listbox.curselection()
@@ -577,102 +643,164 @@ class NissanVarianceApp(tk.Tk):
             self._save_pairs()
             self._refresh_pairs_list()
             self.active_pair_label.configure(text="No pair active", fg=C["text_dim"])
-            self.status_var.set(f"Deleted pair: {label}")
+            self.status_var.set(f"Deleted: {label}")
 
     # ══════════════════════════════════════════════════════════════
-    #  RUN ANALYSIS  ← calls variance_engine.py
+    #  GENERATE FILE  (single button)
     # ══════════════════════════════════════════════════════════════
-    def _run_analysis(self):
-        # Validate inputs
-        selected = self._get_selected_scenarios()
-        if len(selected) == 0:
-            messagebox.showwarning("No Scenario",
-                                   "Please select at least 1 scenario to run the analysis.")
-            return
+    def _generate_file(self):
+        # ── Validation ──────────────────────────────────────────
         if not self.quarter_var.get():
             messagebox.showwarning("No Quarter", "Please select a Financial Quarter.")
             return
         if not self.month_var.get():
             messagebox.showwarning("No Month", "Please select a Month.")
             return
-        if not self.all_loaded or not self.files_found:
-            messagebox.showwarning("Files Not Loaded",
-                                   "Please add folders and click 'Scan Files' first.")
+
+        selected = self._get_selected_scenarios()
+        if len(selected) < 2:
+            messagebox.showwarning("No Scenarios",
+                                   "Please select at least 2 scenarios (1 pair).")
             return
+        if len(selected) % 2 != 0:
+            messagebox.showwarning("Odd Selection",
+                                   f"{len(selected)} scenarios selected.\n"
+                                   "Please select an even number to form complete pairs.")
+            return
+
+        master = self.master_file_var.get().strip()
+        if not master or not os.path.isfile(master):
+            messagebox.showwarning("No Master File",
+                                   "Please select a valid Master File in section 04.")
+            return
+
+        template = self.template_file_var.get().strip()
+        if not template or not os.path.isfile(template):
+            messagebox.showwarning("No Template File",
+                                   "Please select a valid Template File in section 05.")
+            return
+
         out_dir = self.output_entry.get().strip()
-        if not out_dir or out_dir == "Select output folder…":
+        if not out_dir or out_dir == "Select output folder...":
             messagebox.showwarning("No Output Folder", "Please select an output folder.")
             return
 
-        # Collect all scanned file paths
+        pairs = self._build_pairs(selected)
+
+        # Collect all input files (for audit log only)
         all_files = []
         for folder, files in self.files_found.items():
             for f in files:
                 all_files.append(os.path.join(folder, f))
 
-        # Build arguments dict passed to the engine
-        # 'scenarios' drives tab generation; legacy keys kept for compatibility
-        run_args = {
-            "scenarios":     selected,
-            "scenario_1":    selected[0],
-            "scenario_2":    selected[1] if len(selected) > 1 else "",
-            "quarter":       self.quarter_var.get(),
-            "month":         self.month_var.get(),
-            "input_folders": self.input_folders,
-            "input_files":   all_files,
-            "output_folder": out_dir,
-            "timestamp":     datetime.now().strftime("%Y%m%d_%H%M%S"),
-        }
-
-        sc_lines = "\n".join(f"  Scenario {i+1}  : {s}"
-                             for i, s in enumerate(selected))
-        confirm = (
-            f"Run Variance Analysis with:\n\n"
-            f"{sc_lines}\n"
+        # ── Confirm dialog ───────────────────────────────────────
+        pair_lines = "\n".join(f"    {a} vs {b}" for a, b in pairs)
+        confirm_msg = (
+            f"Generate output file:\n\n"
+            f"  Pairs:\n{pair_lines}\n\n"
             f"  Quarter    : {self.quarter_var.get()}\n"
             f"  Month      : {self.month_var.get()}\n"
+            f"  Master     : {os.path.basename(master)}\n"
+            f"  Template   : {os.path.basename(template)}\n"
             f"  Output     : {out_dir}\n\n"
-            f"Each scenario will produce 2 tabs (MTD + YTD).\n\nProceed?"
+            f"Each pair produces MTD + YTD tabs in a single output file.\n\nProceed?"
         )
-        if not messagebox.askyesno("Confirm Run", confirm):
+        if not messagebox.askyesno("Confirm", confirm_msg):
             return
 
-        self.status_var.set("Running analysis…")
-        self.progress["value"] = 0
-        self.progress_label.configure(text="Starting engine…")
-        threading.Thread(target=self._run_thread, args=(run_args,), daemon=True).start()
+        os.makedirs(out_dir, exist_ok=True)
 
-    def _run_thread(self, args: dict):
+        run_args = {
+            "scenario_pairs":  pairs,
+            "quarter":         self.quarter_var.get(),
+            "month":           self.month_var.get(),
+            "input_folders":   list(self.input_folders),
+            "input_files":     all_files,
+            "master_file":     master,
+            "template_file":   template,
+            "output_folder":   out_dir,
+            "timestamp":       datetime.now().strftime("%Y%m%d_%H%M%S"),
+        }
+
+        self.status_var.set("Generating output file…")
+        self.progress["value"] = 0
+        self.progress_label.configure(text="Starting…")
+        threading.Thread(target=self._generate_thread,
+                         args=(run_args,), daemon=True).start()
+
+    def _generate_thread(self, args: dict):
         try:
             import variance_engine
-            variance_engine.run_variance(args)
-            self.after(0, self._on_run_complete, args["output_folder"], None)
-        except ImportError:
-            self.after(0, self._on_run_complete, args["output_folder"],
-                       "variance_engine.py not found in the same folder.")
-        except Exception as e:
-            self.after(0, self._on_run_complete, args["output_folder"], str(e))
+            import importlib
+            importlib.reload(variance_engine)
 
-    def _on_run_complete(self, out_dir, error):
-        self.progress["value"] = 100
+            self.after(0, self._update_progress, 30, "Copying master file…")
+            out_path = variance_engine.run_variance(args)
+            self.after(0, self._update_progress, 95, "Saving workbook…")
+            time.sleep(0.3)
+            self.after(0, self._on_generate_complete,
+                       args["output_folder"], out_path, None)
+        except ImportError:
+            self.after(0, self._on_generate_complete,
+                       args["output_folder"], None,
+                       "variance_engine.py not found.\n"
+                       "Make sure it is in the same folder as this app.")
+        except Exception as e:
+            self.after(0, self._on_generate_complete,
+                       args["output_folder"], None, str(e))
+
+    def _update_progress(self, pct, msg):
+        self.progress["value"] = pct
+        self.progress_label.configure(text=msg)
+        self.status_var.set(msg)
+
+    def _on_generate_complete(self, out_dir, out_path, error):
+        self.progress["value"] = 100 if not error else 0
         if error:
-            self.progress_label.configure(text=f"Error: {error}")
-            self.status_var.set("Run failed.")
-            messagebox.showerror("Run Error", error)
-        else:
-            self.progress_label.configure(text="Analysis complete ✓")
-            self.status_var.set(f"Analysis saved to: {out_dir}")
-            messagebox.showinfo("Done", f"Analysis complete.\nOutput: {out_dir}")
+            self.progress_label.configure(text="Error")
+            self.status_var.set("Generation failed.")
+            messagebox.showerror("Error", error)
+            return
+
+        fname = os.path.basename(out_path) if out_path else ""
+        self.progress_label.configure(text=f"Done  —  {fname}")
+        self.status_var.set(f"Saved: {out_path}")
+
+        popup = tk.Toplevel(self)
+        popup.title("File Generated")
+        popup.configure(bg=C["bg_card"])
+        popup.resizable(False, False)
+        popup.geometry("480x220")
+        popup.grab_set()
+        self.update_idletasks()
+        x = self.winfo_x() + (self.winfo_width()  - 480) // 2
+        y = self.winfo_y() + (self.winfo_height() - 220) // 2
+        popup.geometry(f"+{x}+{y}")
+
+        tk.Frame(popup, bg=C["success"], height=4).pack(fill="x")
+        tk.Label(popup, text="Output File Generated",
+                 bg=C["bg_card"], fg=C["white"],
+                 font=("Helvetica Neue", 14, "bold")).pack(pady=(18, 4))
+        tk.Label(popup,
+                 text=f"{fname}\n\n{out_dir}",
+                 bg=C["bg_card"], fg=C["silver_dim"],
+                 font=("Helvetica Neue", 9), justify="center").pack(pady=(4, 16))
+        br = tk.Frame(popup, bg=C["bg_card"])
+        br.pack()
+        ttk.Button(br, text="Open Folder", style="Ghost.TButton",
+                   command=lambda: self._open_folder(out_dir)).pack(side="left", padx=6)
+        ttk.Button(br, text="Close", style="Red.TButton",
+                   command=popup.destroy).pack(side="left", padx=6)
 
     # ══════════════════════════════════════════════════════════════
-    #  FOLDER / FILE LOGIC (unchanged from original)
+    #  FOLDER / FILE LOGIC
     # ══════════════════════════════════════════════════════════════
     def _clear_placeholder(self, _):
-        if self.folder_entry.get() == "Paste folder path or browse…":
+        if self.folder_entry.get() == "Paste folder path or browse...":
             self.folder_entry.delete(0, "end")
 
     def _clear_output_placeholder(self, _):
-        if self.output_entry.get() == "Select output folder…":
+        if self.output_entry.get() == "Select output folder...":
             self.output_entry.delete(0, "end")
 
     def _browse_folder(self):
@@ -687,9 +815,31 @@ class NissanVarianceApp(tk.Tk):
             self.output_entry.delete(0, "end")
             self.output_entry.insert(0, path)
 
+    def _browse_master_file(self):
+        path = filedialog.askopenfilename(
+            title="Select Master File",
+            filetypes=[("Excel files", "*.xlsx *.xlsm *.xls"), ("All files", "*.*")]
+        )
+        if path:
+            self.master_file_var.set(path)
+            self.master_status.configure(
+                text=f"Selected: {os.path.basename(path)}", fg=C["success"])
+            self.status_var.set(f"Master file set: {os.path.basename(path)}")
+
+    def _browse_template_file(self):
+        path = filedialog.askopenfilename(
+            title="Select Template File",
+            filetypes=[("Excel files", "*.xlsx *.xlsm *.xls"), ("All files", "*.*")]
+        )
+        if path:
+            self.template_file_var.set(path)
+            self.template_status.configure(
+                text=f"Selected: {os.path.basename(path)}", fg=C["success"])
+            self.status_var.set(f"Template file set: {os.path.basename(path)}")
+
     def _add_folder(self):
         path = self.folder_entry.get().strip()
-        if not path or path == "Paste folder path or browse…":
+        if not path or path == "Paste folder path or browse...":
             messagebox.showwarning("No Path", "Please enter or browse for a folder path.")
             return
         if not os.path.isdir(path):
@@ -699,10 +849,10 @@ class NissanVarianceApp(tk.Tk):
             messagebox.showinfo("Duplicate", "This folder is already in the list.")
             return
         self.input_folders.append(path)
-        self.folder_listbox.insert("end", f"  📁  {path}")
+        self.folder_listbox.insert("end", f"  {path}")
         self.status_var.set(f"Folder added: {os.path.basename(path)}")
         self.folder_entry.delete(0, "end")
-        self.folder_entry.insert(0, "Paste folder path or browse…")
+        self.folder_entry.insert(0, "Paste folder path or browse...")
 
     def _remove_folder(self):
         sel = self.folder_listbox.curselection()
@@ -747,7 +897,7 @@ class NissanVarianceApp(tk.Tk):
         total = sum(len(v) for v in self.files_found.values())
         self.all_loaded = True
         self.status_var.set(
-            f"Scan complete — {total} file(s) found across {len(self.input_folders)} folder(s)"
+            f"Scan complete — {total} file(s) across {len(self.input_folders)} folder(s)"
         )
         self._show_loaded_popup(total)
 
@@ -762,19 +912,19 @@ class NissanVarianceApp(tk.Tk):
         total = 0
         for folder, files in self.files_found.items():
             name = os.path.basename(folder) or folder
-            self.file_text.insert("end", f"\n📁  {name}\n", "folder")
+            self.file_text.insert("end", f"\n  {name}\n", "folder")
             self.file_text.insert("end", f"   {folder}\n", "dim")
             if files:
                 for f in sorted(files):
-                    tag = "ok" if any(rf.lower() in f.lower() for rf in REQUIRED_FILES) else "dim"
-                    mark = "✓" if tag == "ok" else "·"
+                    tag  = "ok" if any(rf.lower() in f.lower() for rf in REQUIRED_FILES) else "dim"
+                    mark = "v" if tag == "ok" else "-"
                     self.file_text.insert("end", f"   {mark}  {f}\n", tag)
                     total += 1
             else:
                 self.file_text.insert("end", "   (empty folder)\n", "missing")
             self.file_text.insert("end", "\n")
         self.file_summary.configure(
-            text=f"{total} file(s) across {len(self.files_found)} folder(s)\n✓ = required  ·  · = other",
+            text=f"{total} file(s) across {len(self.files_found)} folder(s)\nv = required  |  - = other",
             fg=C["silver_dim"]
         )
         self.file_text.configure(state="disabled")
@@ -788,120 +938,19 @@ class NissanVarianceApp(tk.Tk):
         popup.grab_set()
         popup.focus_set()
         self.update_idletasks()
-        x = self.winfo_x() + (self.winfo_width() - 380) // 2
+        x = self.winfo_x() + (self.winfo_width()  - 380) // 2
         y = self.winfo_y() + (self.winfo_height() - 200) // 2
         popup.geometry(f"+{x}+{y}")
         tk.Frame(popup, bg=C["nissan_red"], height=4).pack(fill="x")
-        tk.Label(popup, text="✓", bg=C["bg_card"], fg=C["success"],
-                 font=("Helvetica Neue", 36)).pack(pady=(18, 4))
         tk.Label(popup, text="All Files Loaded",
                  bg=C["bg_card"], fg=C["white"],
-                 font=("Helvetica Neue", 14, "bold")).pack()
-        tk.Label(popup, text=f"{total} file(s) scanned from {len(self.input_folders)} folder(s).",
+                 font=("Helvetica Neue", 14, "bold")).pack(pady=(24, 4))
+        tk.Label(popup,
+                 text=f"{total} file(s) from {len(self.input_folders)} folder(s).",
                  bg=C["bg_card"], fg=C["silver_dim"],
                  font=("Helvetica Neue", 9)).pack(pady=(4, 16))
         ttk.Button(popup, text="Continue", style="Red.TButton",
                    command=popup.destroy).pack(pady=(0, 16))
-
-    def _generate_files(self):
-        if not self.all_loaded or not self.files_found:
-            messagebox.showwarning("Files Not Loaded",
-                                   "Please add folders and click 'Scan Files' first.")
-            return
-        if not self.quarter_var.get():
-            messagebox.showwarning("No Quarter", "Please select a Financial Quarter.")
-            return
-        if not self.month_var.get():
-            messagebox.showwarning("No Month", "Please select a Month.")
-            return
-        selected = self._get_selected_scenarios()
-        if not selected:
-            messagebox.showwarning("No Scenario", "Please select at least 1 forecast scenario.")
-            return
-        out_dir = self.output_entry.get().strip()
-        if not out_dir or out_dir == "Select output folder…":
-            messagebox.showwarning("No Output Folder", "Please select an output folder.")
-            return
-        if not os.path.isdir(out_dir):
-            try:
-                os.makedirs(out_dir, exist_ok=True)
-            except Exception as e:
-                messagebox.showerror("Error", f"Cannot create output folder:\n{e}")
-                return
-        confirm_msg = (
-            f"Generate output files for:\n\n"
-            f"  Quarter    : {self.quarter_var.get()}\n"
-            f"  Month      : {self.month_var.get()}\n"
-            f"  Scenarios  : {', '.join(selected)}\n\n"
-            f"Files will be saved to:\n  {out_dir}\n\nProceed?"
-        )
-        if not messagebox.askyesno("Confirm Generation", confirm_msg):
-            return
-        threading.Thread(target=self._generate_thread,
-                         args=(out_dir, selected), daemon=True).start()
-
-    def _generate_thread(self, out_dir, scenarios):
-        total_steps = len(scenarios) * max(
-            sum(len(v) for v in self.files_found.values()), 1
-        )
-        step = 0
-        quarter = self.quarter_var.get().split()[0]
-        month = self.month_var.get()
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-        for scenario in scenarios:
-            sc_label = scenario.replace(" ", "_").replace("+", "p")
-            for folder, files in self.files_found.items():
-                for fname in files:
-                    src = os.path.join(folder, fname)
-                    stem, ext = os.path.splitext(fname)
-                    versioned = f"{stem}__{quarter}_{month}__{sc_label}__v{ts}{ext}"
-                    dst = os.path.join(out_dir, versioned)
-                    try:
-                        shutil.copy2(src, dst)
-                    except Exception:
-                        pass
-                    step += 1
-                    pct = min(int(step / total_steps * 100), 99)
-                    self.after(0, self._update_progress,
-                               pct, f"Processing {scenario} — {fname}")
-                    time.sleep(0.05)
-
-        self.after(0, self._on_generation_complete, out_dir, ts)
-
-    def _update_progress(self, pct, msg):
-        self.progress["value"] = pct
-        self.progress_label.configure(text=msg)
-        self.status_var.set(msg)
-
-    def _on_generation_complete(self, out_dir, ts):
-        self.progress["value"] = 100
-        self.progress_label.configure(text="Generation complete ✓")
-        self.status_var.set(f"Output saved to: {out_dir}")
-        popup = tk.Toplevel(self)
-        popup.title("Generation Complete")
-        popup.configure(bg=C["bg_card"])
-        popup.resizable(False, False)
-        popup.geometry("480x260")
-        popup.grab_set()
-        self.update_idletasks()
-        x = self.winfo_x() + (self.winfo_width() - 480) // 2
-        y = self.winfo_y() + (self.winfo_height() - 260) // 2
-        popup.geometry(f"+{x}+{y}")
-        tk.Frame(popup, bg=C["success"], height=4).pack(fill="x")
-        tk.Label(popup, text="Files Generated Successfully",
-                 bg=C["bg_card"], fg=C["white"],
-                 font=("Helvetica Neue", 14, "bold")).pack(pady=(18, 4))
-        tk.Label(popup,
-                 text=f"Version stamp: {ts}\n\nOutput folder:\n{out_dir}",
-                 bg=C["bg_card"], fg=C["silver_dim"],
-                 font=("Helvetica Neue", 9), justify="center").pack(pady=(4, 16))
-        br = tk.Frame(popup, bg=C["bg_card"])
-        br.pack()
-        ttk.Button(br, text="Open Folder", style="Ghost.TButton",
-                   command=lambda: self._open_folder(out_dir)).pack(side="left", padx=6)
-        ttk.Button(br, text="Close", style="Red.TButton",
-                   command=popup.destroy).pack(side="left", padx=6)
 
     def _open_folder(self, path):
         import subprocess
