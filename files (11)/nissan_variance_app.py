@@ -10,6 +10,14 @@ import time
 import json
 from datetime import datetime
 
+# ── Ensure the folder that contains THIS script is always on sys.path ──
+# This guarantees variance_engine.py (sitting next to this file) can be
+# imported even when the app is launched from a different working directory
+# (e.g. via a desktop shortcut, Task Scheduler, or double-click).
+_APP_DIR = os.path.dirname(os.path.abspath(__file__))
+if _APP_DIR not in sys.path:
+    sys.path.insert(0, _APP_DIR)
+
 try:
     import tkinter as tk
     from tkinter import ttk, filedialog, messagebox
@@ -730,21 +738,33 @@ class NissanVarianceApp(tk.Tk):
 
     def _generate_thread(self, args: dict):
         try:
-            import variance_engine
-            import importlib
-            importlib.reload(variance_engine)
+            # Always ensure the app's own folder is on sys.path so that
+            # variance_engine.py (sitting next to this file) is found
+            # regardless of the working directory Python was launched from.
+            if _APP_DIR not in sys.path:
+                sys.path.insert(0, _APP_DIR)
+
+            engine_path = os.path.join(_APP_DIR, "variance_engine.py")
+            if not os.path.isfile(engine_path):
+                raise FileNotFoundError(
+                    f"variance_engine.py not found in:\n{_APP_DIR}\n\n"
+                    "Both files must be in the same folder."
+                )
+
+            # Load the engine fresh from disk every run (no stale cached module)
+            import importlib.util
+            spec   = importlib.util.spec_from_file_location(
+                        "variance_engine", engine_path)
+            engine = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(engine)
 
             self.after(0, self._update_progress, 30, "Copying master file…")
-            out_path = variance_engine.run_variance(args)
+            out_path = engine.run_variance(args)
             self.after(0, self._update_progress, 95, "Saving workbook…")
             time.sleep(0.3)
             self.after(0, self._on_generate_complete,
                        args["output_folder"], out_path, None)
-        except ImportError:
-            self.after(0, self._on_generate_complete,
-                       args["output_folder"], None,
-                       "variance_engine.py not found.\n"
-                       "Make sure it is in the same folder as this app.")
+
         except Exception as e:
             self.after(0, self._on_generate_complete,
                        args["output_folder"], None, str(e))
