@@ -1,0 +1,3147 @@
+# """
+# Submit_2.py  –  fully guarded calculation engine  (v5)
+# -------------------------------------------------------
+# v5 adds a Z_AUDIT diagnostic system:
+#   Every time Z ("=0") is written, the reason is recorded with:
+#     - which cell (sheet, excel_row, col)
+#     - which guard layer triggered
+#     - what was missing (file path, DataFrame name, row/col value)
+
+#   At the end of the run, a human-readable error log is written to:
+#       <output_path>/zero_population_audit_<timestamp>.txt
+
+#   This makes it easy to answer "why is =0 in cell X?" without
+#   reading through thousands of log lines.
+
+# Four-layer defence (unchanged from v4):
+
+#   Layer 1 – Input normalisation  : None paths→"", None DFs→empty DataFrame
+#   Layer 2 – Presence flags       : HAS_* booleans block all row/col lookups
+#                                    when the source DF or file is absent.
+#   Layer 3 – Integer guardrail    : _int(v) converts EVERY value that comes
+#                                    from a dict lookup to int before arithmetic.
+#                                    If conversion fails → 0, so row+1 never
+#                                    raises TypeError.
+#   Layer 4 – Safe formula builders: _safe_gen_formula / _safe_extract_formula
+#                                    return Z ("=0") when row==0 or col==0,
+#                                    so generate_excel_formula is never called
+#                                    with invalid arguments.
+# """
+
+# from __future__ import annotations
+
+# import os
+# import time
+# import datetime
+# from collections import defaultdict
+# from typing import Optional
+
+# import pandas as pd
+
+# from Submit_2_Helper_function import (
+#     find_row_numbers,
+#     find_fmi_row_uc,
+#     find_fmi_row_as,
+#     find_fmi_row_export,
+#     find_financial_indices,
+#     find_oem_terms,
+#     find_ocs_terms,
+#     search_rd_terms,
+#     find_R_and_D_File,
+#     tax_and_public,
+#     operating_profit,
+#     relief_search_terms_new,
+#     G_and_A_Reliev1,
+#     export_ITP_Export,
+#     energy_tgk_68,
+#     find_columns_with_month_short,
+#     find_columns_with_month_long,
+#     find_month_columns_Relief_KD,
+#     find_month_columns_export,
+#     find_indices_feuil,
+#     find_op_and_month,
+#     find_outside_profit_and_month_value,
+#     find_second_column_for_outside_profit,
+#     generate_excel_formula,
+#     generate_excel_formula_249,
+#     extract_formula,
+#     extract_value_formula_latest,
+#     manage_sheet_visibility,
+#     paste_values_KPI_PL,
+# )
+# from ACT import ACT
+# from utils.logger import logger
+
+# logger.info("Submit_2 triggered")
+
+# # ─────────────────────────────────────────────────────────────────────────────
+# #  SENTINEL
+# # ─────────────────────────────────────────────────────────────────────────────
+# Z = "=0"   # written to cells when data is unavailable
+
+
+# # ═══════════════════════════════════════════════════════════════════════════════
+# #  Z-AUDIT SYSTEM
+# # ═══════════════════════════════════════════════════════════════════════════════
+
+# class ZAudit:
+#     """
+#     Collects all reasons why Z ("=0") was written instead of a real formula.
+
+#     Categories
+#     ----------
+#     FILE_MISSING     : a file path was empty or the file did not exist on disk
+#     DF_MISSING       : a DataFrame was None / not a DataFrame / empty
+#     ROW_ZERO         : a row index resolved to 0 (key not found in search dict)
+#     COL_ZERO         : a column index resolved to 0 (month column not found)
+#     ROW_AND_COL_ZERO : both row and col were 0
+#     INT_CONVERT_FAIL : _int() could not parse a value (fell back to 0)
+#     EXCEPTION        : an unexpected exception inside a safe wrapper
+#     COMPOUND_Z       : a compound formula (e.g. a-b) where one operand was Z
+#     DELIBERATE       : explicitly set to Z by business logic (not a data gap)
+#     """
+
+#     CATEGORIES = [
+#         "FILE_MISSING",
+#         "DF_MISSING",
+#         "ROW_ZERO",
+#         "COL_ZERO",
+#         "ROW_AND_COL_ZERO",
+#         "INT_CONVERT_FAIL",
+#         "EXCEPTION",
+#         "COMPOUND_Z",
+#         "DELIBERATE",
+#     ]
+
+#     def __init__(self):
+#         self.records: dict[str, list[tuple[str, str]]] = defaultdict(list)
+#         self._start = datetime.datetime.now()
+
+#     def record(self, category: str, detail: str, context: str = "") -> None:
+#         self.records[category].append((detail, context))
+#         logger.debug(f"[Z-AUDIT] {category} | {detail} | ctx={context}")
+
+#     def write_report(self, output_dir: str) -> str:
+#         os.makedirs(output_dir, exist_ok=True)
+#         ts = self._start.strftime("%Y%m%d_%H%M%S")
+#         report_path = os.path.join(output_dir, f"zero_population_audit_{ts}.txt")
+
+#         total = sum(len(v) for v in self.records.values())
+#         lines = [
+#             "=" * 78,
+#             "  ZERO POPULATION AUDIT REPORT",
+#             f"  Generated : {self._start.strftime('%Y-%m-%d %H:%M:%S')}",
+#             f"  Total =0  : {total} occurrences",
+#             "=" * 78,
+#             "",
+#             "HOW TO READ THIS REPORT",
+#             "-" * 78,
+#             "Each section lists one CATEGORY of reason why a cell got =0.",
+#             "Under each category you will find:",
+#             "  DETAIL  – the specific missing piece (file path, df name, value)",
+#             "  CONTEXT – which formula builder / cell / helper was affected",
+#             "",
+#             "QUICK DIAGNOSIS GUIDE",
+#             "-" * 78,
+#             "  FILE_MISSING     → The file path was '' or the file does not exist.",
+#             "                     Check that the path is passed correctly to the",
+#             "                     function and that the file has been saved/exported.",
+#             "",
+#             "  DF_MISSING       → The DataFrame was None, not a DataFrame, or empty.",
+#             "                     The upstream loader probably returned nothing.",
+#             "                     Check the sheet name / file used to build that DF.",
+#             "",
+#             "  ROW_ZERO         → A row key was not found in the search dictionary.",
+#             "                     The label in the source file may have changed or",
+#             "                     a search function did not match the expected text.",
+#             "",
+#             "  COL_ZERO         → The month column was not found in the DataFrame.",
+#             "                     Check that month headers exist in the source sheet.",
+#             "",
+#             "  ROW_AND_COL_ZERO → Both row and column were 0 simultaneously.",
+#             "",
+#             "  INT_CONVERT_FAIL → A value that should be a row/col number could not",
+#             "                     be converted to int (e.g. was a string like 'N/A').",
+#             "",
+#             "  EXCEPTION        → An unexpected Python exception inside a safe wrapper.",
+#             "                     Check the main log for the full traceback.",
+#             "",
+#             "  COMPOUND_Z       → A combined formula (e.g. A - B) where at least one",
+#             "                     component was already Z, so the whole formula is Z.",
+#             "",
+#             "  DELIBERATE       → Intentionally set to Z by business logic (not a bug).",
+#             "",
+#             "=" * 78,
+#             "",
+#         ]
+
+#         for cat in self.CATEGORIES:
+#             entries = self.records.get(cat, [])
+#             lines.append(f"{'─'*78}")
+#             lines.append(f"  {cat}  ({len(entries)} occurrences)")
+#             lines.append(f"{'─'*78}")
+#             if not entries:
+#                 lines.append("  (none)")
+#             else:
+#                 counts: dict[tuple, int] = defaultdict(int)
+#                 for entry in entries:
+#                     counts[entry] += 1
+#                 for (detail, context), cnt in sorted(counts.items(), key=lambda x: -x[1]):
+#                     prefix = f"  x{cnt:>3}  " if cnt > 1 else "         "
+#                     lines.append(f"{prefix}DETAIL : {detail}")
+#                     if context:
+#                         lines.append(f"         CONTEXT: {context}")
+#                     lines.append("")
+#             lines.append("")
+
+#         lines.append("=" * 78)
+#         lines.append("  SUMMARY BY CATEGORY")
+#         lines.append("=" * 78)
+#         for cat in self.CATEGORIES:
+#             n = len(self.records.get(cat, []))
+#             if n:
+#                 lines.append(f"  {cat:<22} : {n:>5}")
+#         lines.append(f"  {'TOTAL':<22} : {total:>5}")
+#         lines.append("=" * 78)
+
+#         report_text = "\n".join(lines)
+#         with open(report_path, "w", encoding="utf-8") as fh:
+#             fh.write(report_text)
+
+#         logger.info(f"Z-Audit report written → {report_path}  ({total} zero events)")
+#         return report_path
+
+
+# # Module-level singleton
+# z_audit = ZAudit()
+
+
+# # ═══════════════════════════════════════════════════════════════════════════════
+# #  LAYER 3  –  INTEGER GUARDRAIL
+# # ═══════════════════════════════════════════════════════════════════════════════
+
+# def _int(v, context: str = "") -> int:
+#     if v is None:
+#         return 0
+#     try:
+#         return int(v)
+#     except (TypeError, ValueError):
+#         msg = f"could not convert {v!r} to int"
+#         logger.warning(f"_int(): {msg} – using 0")
+#         z_audit.record("INT_CONVERT_FAIL", msg, context)
+#         return 0
+
+
+# def _int_list(lst, context: str = "") -> list:
+#     if not lst:
+#         return [0]
+#     return [_int(x, context) for x in lst]
+
+
+# # ═══════════════════════════════════════════════════════════════════════════════
+# #  LAYER 1  –  INPUT CHECKERS
+# # ═══════════════════════════════════════════════════════════════════════════════
+
+# def _df_ok(df, name: str) -> bool:
+#     if df is None:
+#         logger.warning(f"[SKIP] DataFrame '{name}' is None – cells → =0")
+#         z_audit.record("DF_MISSING", f"DataFrame '{name}' is None",
+#                        f"presence check for {name}")
+#         return False
+#     if not isinstance(df, pd.DataFrame):
+#         logger.warning(f"[SKIP] DataFrame '{name}' is not a DataFrame ({type(df)}) – cells → =0")
+#         z_audit.record("DF_MISSING",
+#                        f"DataFrame '{name}' has wrong type: {type(df).__name__}",
+#                        f"presence check for {name}")
+#         return False
+#     if df.empty:
+#         logger.warning(f"[SKIP] DataFrame '{name}' is empty – cells → =0")
+#         z_audit.record("DF_MISSING", f"DataFrame '{name}' is empty (0 rows)",
+#                        f"presence check for {name}")
+#         return False
+#     return True
+
+
+# def _file_ok(path: str, name: str) -> bool:
+#     if not path:
+#         logger.warning(f"[SKIP] File '{name}' path is empty – formulas → =0")
+#         z_audit.record("FILE_MISSING",
+#                        f"File '{name}': path is empty string",
+#                        f"presence check for {name}")
+#         return False
+#     if not os.path.isfile(path):
+#         logger.warning(f"[SKIP] File '{name}' not found at {path!r} – formulas → =0")
+#         z_audit.record("FILE_MISSING",
+#                        f"File '{name}' not found on disk: {path}",
+#                        f"presence check for {name}")
+#         return False
+#     return True
+
+
+# # ═══════════════════════════════════════════════════════════════════════════════
+# #  LAYER 2  –  SAFE WRAPPERS
+# # ═══════════════════════════════════════════════════════════════════════════════
+
+# def _safe_col_short(df, month, name):
+#     if not _df_ok(df, name): return 0
+#     try:
+#         result = _int(find_columns_with_month_short(df, month),
+#                       f"find_columns_with_month_short({name})")
+#         if result == 0:
+#             z_audit.record("COL_ZERO",
+#                            f"Month {month} not found in '{name}' (short header search)",
+#                            f"find_columns_with_month_short({name})")
+#         return result
+#     except Exception as e:
+#         logger.warning(f"find_columns_with_month_short({name}): {e}")
+#         z_audit.record("EXCEPTION", str(e), f"find_columns_with_month_short({name})")
+#         return 0
+
+# def _safe_col_long(df, month, name):
+#     if not _df_ok(df, name): return 0
+#     try:
+#         result = _int(find_columns_with_month_long(df, month),
+#                       f"find_columns_with_month_long({name})")
+#         if result == 0:
+#             z_audit.record("COL_ZERO",
+#                            f"Month {month} not found in '{name}' (long header search)",
+#                            f"find_columns_with_month_long({name})")
+#         return result
+#     except Exception as e:
+#         logger.warning(f"find_columns_with_month_long({name}): {e}")
+#         z_audit.record("EXCEPTION", str(e), f"find_columns_with_month_long({name})")
+#         return 0
+
+# def _safe_find_row_numbers(df, name) -> dict:
+#     if not _df_ok(df, name): return {}
+#     try:    return find_row_numbers(df) or {}
+#     except Exception as e:
+#         logger.warning(f"find_row_numbers({name}): {e}")
+#         z_audit.record("EXCEPTION", str(e), f"find_row_numbers({name})")
+#         return {}
+
+# def _safe_find_fmi_uc(df, name):
+#     if not _df_ok(df, name): return (0,)*12
+#     try:    return tuple(_int(x, f"fmi_uc({name})") for x in find_fmi_row_uc(df))
+#     except Exception as e:
+#         logger.warning(f"find_fmi_row_uc({name}): {e}")
+#         z_audit.record("EXCEPTION", str(e), f"find_fmi_row_uc({name})")
+#         return (0,)*12
+
+# def _safe_find_fmi_as(df, name):
+#     if not _df_ok(df, name): return (0,)*16
+#     try:    return tuple(_int(x, f"fmi_as({name})") for x in find_fmi_row_as(df))
+#     except Exception as e:
+#         logger.warning(f"find_fmi_row_as({name}): {e}")
+#         z_audit.record("EXCEPTION", str(e), f"find_fmi_row_as({name})")
+#         return (0,)*16
+
+# def _safe_find_fmi_export(df, name):
+#     if not _df_ok(df, name): return (0,)*16
+#     try:    return tuple(_int(x, f"fmi_export({name})") for x in find_fmi_row_export(df))
+#     except Exception as e:
+#         logger.warning(f"find_fmi_row_export({name}): {e}")
+#         z_audit.record("EXCEPTION", str(e), f"find_fmi_row_export({name})")
+#         return (0,)*16
+
+# def _safe_financial_indices(df, name):
+#     if not _df_ok(df, name): return ([0],[0],[0],[0],[0])
+#     try:
+#         result = find_financial_indices(df)
+#         return tuple(_int_list(lst, f"financial_indices({name})") for lst in result)
+#     except Exception as e:
+#         logger.warning(f"find_financial_indices({name}): {e}")
+#         z_audit.record("EXCEPTION", str(e), f"find_financial_indices({name})")
+#         return ([0],[0],[0],[0],[0])
+
+# def _safe_oem_terms(df, name):
+#     if not _df_ok(df, name): return ([0],[0],[0],[0],[0],[0],[0],[0])
+#     try:
+#         result = find_oem_terms(df)
+#         return tuple(_int_list(lst, f"oem_terms({name})") for lst in result)
+#     except Exception as e:
+#         logger.warning(f"find_oem_terms({name}): {e}")
+#         z_audit.record("EXCEPTION", str(e), f"find_oem_terms({name})")
+#         return ([0],[0],[0],[0],[0],[0],[0],[0])
+
+# def _safe_ocs_terms(df, name):
+#     if not _df_ok(df, name): return [0]
+#     try:    return _int_list(find_ocs_terms(df) or [0], f"ocs_terms({name})")
+#     except Exception as e:
+#         logger.warning(f"find_ocs_terms({name}): {e}")
+#         z_audit.record("EXCEPTION", str(e), f"find_ocs_terms({name})")
+#         return [0]
+
+# def _safe_rd_terms(df, name) -> dict:
+#     if not _df_ok(df, name): return {}
+#     try:    return search_rd_terms(df) or {}
+#     except Exception as e:
+#         logger.warning(f"search_rd_terms({name}): {e}")
+#         z_audit.record("EXCEPTION", str(e), f"search_rd_terms({name})")
+#         return {}
+
+# def _safe_rd_file(df, name) -> dict:
+#     if not _df_ok(df, name): return {}
+#     try:    return find_R_and_D_File(df) or {}
+#     except Exception as e:
+#         logger.warning(f"find_R_and_D_File({name}): {e}")
+#         z_audit.record("EXCEPTION", str(e), f"find_R_and_D_File({name})")
+#         return {}
+
+# def _safe_tax(df, name):
+#     if not _df_ok(df, name): return [0]
+#     try:    return _int_list(tax_and_public(df) or [0], f"tax_and_public({name})")
+#     except Exception as e:
+#         logger.warning(f"tax_and_public({name}): {e}")
+#         z_audit.record("EXCEPTION", str(e), f"tax_and_public({name})")
+#         return [0]
+
+# def _safe_op(df, name):
+#     if not _df_ok(df, name): return [0]
+#     try:    return _int_list(operating_profit(df) or [0], f"operating_profit({name})")
+#     except Exception as e:
+#         logger.warning(f"operating_profit({name}): {e}")
+#         z_audit.record("EXCEPTION", str(e), f"operating_profit({name})")
+#         return [0]
+
+# def _safe_reclass(df, name) -> int:
+#     if not _df_ok(df, name): return 0
+#     try:
+#         r = G_and_A_Reliev1(df)
+#         return _int(r, f"reclass({name})") if r is not None else 0
+#     except Exception as e:
+#         logger.warning(f"G_and_A_Reliev1({name}): {e}")
+#         z_audit.record("EXCEPTION", str(e), f"G_and_A_Reliev1({name})")
+#         return 0
+
+# def _safe_relief(df, name) -> dict:
+#     if not _df_ok(df, name): return {}
+#     try:    return relief_search_terms_new(df) or {}
+#     except Exception as e:
+#         logger.warning(f"relief_search_terms_new({name}): {e}")
+#         z_audit.record("EXCEPTION", str(e), f"relief_search_terms_new({name})")
+#         return {}
+
+# def _safe_outside_profit(df, month, name):
+#     if not _df_ok(df, name): return (0, 0)
+#     try:
+#         r, c = find_outside_profit_and_month_value(df, month)
+#         return (_int(r, f"osp_row({name})"), _int(c, f"osp_col({name})"))
+#     except Exception as e:
+#         logger.warning(f"find_outside_profit_and_month_value({name}): {e}")
+#         z_audit.record("EXCEPTION", str(e), f"find_outside_profit_and_month_value({name})")
+#         return (0, 0)
+
+# def _safe_outside_profit_2(df, month, name):
+#     if not _df_ok(df, name): return (0, 0)
+#     try:
+#         r, c = find_second_column_for_outside_profit(df, month)
+#         return (_int(r, f"osp2_row({name})"), _int(c, f"osp2_col({name})"))
+#     except Exception as e:
+#         logger.warning(f"find_second_column_for_outside_profit({name}): {e}")
+#         z_audit.record("EXCEPTION", str(e), f"find_second_column_for_outside_profit({name})")
+#         return (0, 0)
+
+# def _safe_feuil(df, month, name):
+#     if not _df_ok(df, name): return (0, 0)
+#     try:
+#         r, c = find_indices_feuil(df, month)
+#         return (_int(r, f"feuil_row({name})"), _int(c, f"feuil_col({name})"))
+#     except Exception as e:
+#         logger.warning(f"find_indices_feuil({name}): {e}")
+#         z_audit.record("EXCEPTION", str(e), f"find_indices_feuil({name})")
+#         return (0, 0)
+
+# def _safe_relief_kd_cols(df, month, name):
+#     if not _df_ok(df, name): return [0, 0]
+#     try:    return _int_list(find_month_columns_Relief_KD(df, month) or [0, 0], f"relief_kd_cols({name})")
+#     except Exception as e:
+#         logger.warning(f"find_month_columns_Relief_KD({name}): {e}")
+#         z_audit.record("EXCEPTION", str(e), f"find_month_columns_Relief_KD({name})")
+#         return [0, 0]
+
+# def _safe_itp_rows(df, name):
+#     if not _df_ok(df, name): return [0]
+#     try:    return _int_list(export_ITP_Export(df) or [0], f"itp_rows({name})")
+#     except Exception as e:
+#         logger.warning(f"export_ITP_Export({name}): {e}")
+#         z_audit.record("EXCEPTION", str(e), f"export_ITP_Export({name})")
+#         return [0]
+
+# def _safe_itp_cols(df, month, name):
+#     if not _df_ok(df, name): return [0, 0]
+#     try:    return _int_list(find_month_columns_export(df, month) or [0, 0], f"itp_cols({name})")
+#     except Exception as e:
+#         logger.warning(f"find_month_columns_export({name}): {e}")
+#         z_audit.record("EXCEPTION", str(e), f"find_month_columns_export({name})")
+#         return [0, 0]
+
+# def _safe_nano(df, month, name):
+#     if not _df_ok(df, name): return (0, 0)
+#     try:
+#         r, c = find_op_and_month(df, month)
+#         return (_int(r, f"nano_row({name})"), _int(c, f"nano_col({name})"))
+#     except Exception as e:
+#         logger.warning(f"find_op_and_month({name}): {e}")
+#         z_audit.record("EXCEPTION", str(e), f"find_op_and_month({name})")
+#         return (0, 0)
+
+# def _safe_energy(df, name):
+#     if not _df_ok(df, name): return [0]
+#     try:    return _int_list(energy_tgk_68(df) or [0], f"energy({name})")
+#     except Exception as e:
+#         logger.warning(f"energy_tgk_68({name}): {e}")
+#         z_audit.record("EXCEPTION", str(e), f"energy_tgk_68({name})")
+#         return [0]
+
+
+# # ═══════════════════════════════════════════════════════════════════════════════
+# #  LAYER 4  –  SAFE FORMULA BUILDERS
+# # ═══════════════════════════════════════════════════════════════════════════════
+
+# def _safe_gen_formula(row: int, col: int, sheet: str,
+#                       file_path: str = "", context: str = "") -> str:
+#     row, col = _int(row, context), _int(col, context)
+
+#     if not row and not col:
+#         z_audit.record("ROW_AND_COL_ZERO",
+#                        f"row=0 AND col=0 for sheet='{sheet}'",
+#                        context or f"generate_excel_formula(sheet={sheet})")
+#         return Z
+#     if not row:
+#         z_audit.record("ROW_ZERO",
+#                        f"row=0 for sheet='{sheet}' col={col}",
+#                        context or f"generate_excel_formula(sheet={sheet}, col={col})")
+#         return Z
+#     if not col:
+#         z_audit.record("COL_ZERO",
+#                        f"col=0 for sheet='{sheet}' row={row}",
+#                        context or f"generate_excel_formula(sheet={sheet}, row={row})")
+#         return Z
+
+#     if file_path and not _file_ok(file_path, f"cross-wb [{sheet}]"):
+#         z_audit.record("FILE_MISSING",
+#                        f"Cross-workbook file missing: {file_path}",
+#                        context or f"generate_excel_formula(sheet={sheet}, r={row}, c={col})")
+#         return Z
+
+#     try:
+#         return generate_excel_formula(row, col, sheet,
+#                                       file_path if file_path else None)
+#     except Exception as e:
+#         logger.warning(f"generate_excel_formula(r={row},c={col},{sheet}): {e}")
+#         z_audit.record("EXCEPTION", str(e),
+#                        context or f"generate_excel_formula(r={row},c={col},sheet={sheet})")
+#         return Z
+
+# def _safe_gen_formula_1(row: int, col: int, sheet: str,
+#                       file_path: str = "", context: str = "") -> str:
+#     # row, col = _int(row, context), _int(col, context)
+#     return generate_excel_formula(row-1, col, sheet,
+#                                       file_path if file_path else None)
+
+   
+
+
+# def _safe_extract_formula(file_path: str, sheet: str,
+#                           row: int, col: int, label: str = "") -> str:
+#     row, col = _int(row, label), _int(col, label)
+#     if not row and not col:
+#         z_audit.record("ROW_AND_COL_ZERO",
+#                        f"row=0 AND col=0 for extract_formula(sheet={sheet})", label)
+#         return Z
+#     if not row:
+#         z_audit.record("ROW_ZERO",
+#                        f"row=0 for extract_formula(sheet={sheet}, col={col})", label)
+#         return Z
+#     if not col:
+#         z_audit.record("COL_ZERO",
+#                        f"col=0 for extract_formula(sheet={sheet}, row={row})", label)
+#         return Z
+#     if not _file_ok(file_path, label or f"template extract({sheet},{row},{col})"):
+#         z_audit.record("FILE_MISSING",
+#                        f"Template file missing for extract_formula: {file_path}",
+#                        label or f"extract_formula(sheet={sheet}, r={row}, c={col})")
+#         return Z
+#     try:
+#         result = extract_formula(file_path, sheet, row, col)
+#         return result if result else Z
+#     except Exception as e:
+#         logger.warning(f"extract_formula({sheet},{row},{col}): {e}")
+#         z_audit.record("EXCEPTION", str(e),
+#                        label or f"extract_formula(sheet={sheet}, r={row}, c={col})")
+#         return Z
+
+
+# def _safe_extract_value_formula(file_path: str, month: int) -> str:
+#     if not _file_ok(file_path, "P&L file for extract_value_formula_latest"):
+#         z_audit.record("FILE_MISSING",
+#                        f"P&L file missing: {file_path}",
+#                        f"extract_value_formula_latest(month={month})")
+#         return Z
+#     try:
+#         r = extract_value_formula_latest(file_path, month)
+#         return r if r else Z
+#     except Exception as e:
+#         logger.warning(f"extract_value_formula_latest: {e}")
+#         z_audit.record("EXCEPTION", str(e),
+#                        f"extract_value_formula_latest(month={month})")
+#         return Z
+
+
+# def _safe_gen_formula_249(month: int, file_path_OSP: str) -> str:
+#     if not _file_ok(file_path_OSP, "OSP file for generate_excel_formula_249"):
+#         z_audit.record("FILE_MISSING",
+#                        f"OSP file missing: {file_path_OSP}",
+#                        f"generate_excel_formula_249(month={month})")
+#         return Z
+#     try:
+#         r = generate_excel_formula_249(month, file_path_OSP)
+#         return r if r else Z
+#     except Exception as e:
+#         logger.warning(f"generate_excel_formula_249: {e}")
+#         z_audit.record("EXCEPTION", str(e),
+#                        f"generate_excel_formula_249(month={month})")
+#         return Z
+
+
+# # ═══════════════════════════════════════════════════════════════════════════════
+# #  COMPOUND FORMULA HELPERS
+# # ═══════════════════════════════════════════════════════════════════════════════
+
+# def _join_sum(*formulas, context: str = "") -> str:
+#     parts = [x[1:] for x in formulas if x and x != Z]
+#     zeros = [i for i, x in enumerate(formulas) if x == Z]
+#     if zeros and context:
+#         z_audit.record("COMPOUND_Z",
+#                        f"Operand(s) at index {zeros} were Z in _join_sum",
+#                        context)
+#     return f"={'  +  '.join(parts)}" if parts else Z
+
+
+# def _compound(a: str, op: str, b: str, context: str = "") -> str:
+#     if a == Z or b == Z:
+#         missing = []
+#         if a == Z: missing.append("left operand")
+#         if b == Z: missing.append("right operand")
+#         z_audit.record("COMPOUND_Z",
+#                        f"_compound({op}): {' and '.join(missing)} is Z",
+#                        context)
+#         return Z
+#     return f"={a[1:]}{op}{b[1:]}"
+
+
+# # ═══════════════════════════════════════════════════════════════════════════════
+# #  DICT-ROW EXTRACTOR
+# # ═══════════════════════════════════════════════════════════════════════════════
+
+# def _row_from_dict(d: dict, key: str, dict_name: str = "") -> int:
+#     try:
+#         val = d.get(key)
+#         if not val:
+#             if d:
+#                 z_audit.record("ROW_ZERO",
+#                                f"Key '{key}' not found in search dict",
+#                                f"_row_from_dict(dict={dict_name or 'unknown'})")
+#             return 0
+#         return _int(val[0] if isinstance(val, (list, tuple)) else val,
+#                     f"_row_from_dict key='{key}'")
+#     except Exception:
+#         return 0
+
+
+# # ═══════════════════════════════════════════════════════════════════════════════
+# #  SAFE ROW-BLOCK BUILDER
+# # ═══════════════════════════════════════════════════════════════════════════════
+
+# def _build_row_block(
+#     base_row: int,
+#     col_write: int,
+#     has_df: bool,
+#     col_source: int,
+#     fp_fn,
+#     zero_sentinel: str,
+#     start_excel_row: int,
+#     count: int,
+#     block_name: str = "",
+# ) -> list:
+#     base_row   = _int(base_row)
+#     col_write  = _int(col_write)
+#     col_source = _int(col_source)
+
+#     can_build = has_df and col_source > 0 and base_row > 0
+
+#     if not can_build:
+#         reasons = []
+#         if not has_df:       reasons.append("DataFrame absent (has_df=False)")
+#         if col_source <= 0:  reasons.append(f"col_source={col_source} (month column not found)")
+#         if base_row <= 0:    reasons.append(f"base_row={base_row} (section not found in sheet)")
+#         z_audit.record("ROW_ZERO" if (not has_df or base_row <= 0) else "COL_ZERO",
+#                        f"Block '{block_name or 'unnamed'}' rows {start_excel_row}-"
+#                        f"{start_excel_row+count-1} set to Z: {'; '.join(reasons)}",
+#                        f"_build_row_block(start={start_excel_row}, count={count})")
+
+#     result = []
+#     for i in range(count):
+#         excel_row = start_excel_row + i
+#         formula = fp_fn(_int(base_row) + i) if can_build else zero_sentinel
+#         result.append((excel_row, col_write, formula))
+#     return result
+
+
+# # ═══════════════════════════════════════════════════════════════════════════════
+# #  PUBLIC ENTRY-POINT
+# # ═══════════════════════════════════════════════════════════════════════════════
+
+# def calculate_alternate_value_1(
+#     file_path_P_L: str,
+#     df_P_L_ROP_NE:  pd.DataFrame,
+#     df_P_L_HQ:      pd.DataFrame,
+#     file_path_OSP:  str,
+#     df_OSP:         pd.DataFrame,
+#     file_path_HMF:  str,
+#     df_HMF_Managerial: pd.DataFrame,
+#     file_path_New_KPI: str,
+#     df_P_L_New_KPI: pd.DataFrame,
+#     file_HQ_Item:   str,
+#     df_hQ_items:    pd.DataFrame,
+#     file_goodwill:  str,
+#     df_r_and_d:     pd.DataFrame,
+#     df_MZ_conso:    pd.DataFrame,
+#     df_P_L_Relief:  pd.DataFrame,
+#     df_P_L_PL:      pd.DataFrame,
+#     df_P_L_Reclass: pd.DataFrame,
+#     df_P_L_MCCP:    pd.DataFrame,
+#     df_P_L_OCS:     pd.DataFrame,
+#     df_New_KPI_CFMI:  pd.DataFrame,
+#     df_New_goodwill:  pd.DataFrame,
+#     df_Act:           pd.DataFrame,
+#     file_paths_OSP_TGK:    str,
+#     df_1c_osp:             pd.DataFrame,
+#     file_paths_High_Level_Variance: str,
+#     df_high_variance_feuil:         pd.DataFrame,
+#     file_paths_Relief_KD:  str,
+#     df_Relief_KD:          pd.DataFrame,
+#     file_paths_Purchase_Price: str,
+#     df_Purchase_Price:         pd.DataFrame,
+#     file_paths_UP_Calc:    str,
+#     df_UP_Calc:            pd.DataFrame,
+#     file_paths_NANO_HFM:   str,
+#     df_nano_hfm:           pd.DataFrame,
+#     file_paths_ITP:        str,
+#     df_itp:                pd.DataFrame,
+#     file_path_Template:      str,
+#     file_path_Template_1:    str,
+#     month_number:            int,
+#     Var_Converter:           float,
+#     var_Cfmi:                float,
+#     ePWR_var:                float,
+#     connectivity_var:        float,
+#     cafe_penalty_var:        float,
+#     file_path_Template_man_1: str,
+#     file_path_Template_man:   str,
+#     file_path_goodwill_template: str,
+#     output_path:             str,
+#     var_converter_bJPY:      str,
+#     var_converter_mEUR:      str,
+#     selected_month,var_new_param_1, var_new_param_2
+# ) -> None:
+
+#     global z_audit
+#     z_audit = ZAudit()
+
+#     t0 = time.time()
+#     logger.info("calculate_alternate_value_1 started")
+
+#     # ── Normalise inputs ──────────────────────────────────────────────────────
+#     def _p(v): return v if isinstance(v, str) else ""
+#     def _d(v): return v if isinstance(v, pd.DataFrame) else pd.DataFrame()
+
+#     file_path_P_L               = _p(file_path_P_L)
+#     file_path_OSP               = _p(file_path_OSP)
+#     file_path_HMF               = _p(file_path_HMF)
+#     file_path_New_KPI           = _p(file_path_New_KPI)
+#     file_HQ_Item                = _p(file_HQ_Item)
+#     file_goodwill               = _p(file_goodwill)
+#     file_paths_OSP_TGK          = _p(file_paths_OSP_TGK)
+#     file_paths_High_Level_Variance = _p(file_paths_High_Level_Variance)
+#     file_paths_Relief_KD        = _p(file_paths_Relief_KD)
+#     file_paths_Purchase_Price   = _p(file_paths_Purchase_Price)
+#     file_paths_UP_Calc          = _p(file_paths_UP_Calc)
+#     file_paths_NANO_HFM         = _p(file_paths_NANO_HFM)
+#     file_paths_ITP              = _p(file_paths_ITP)
+#     file_path_Template          = _p(file_path_Template)
+#     file_path_Template_1        = _p(file_path_Template_1)
+#     file_path_Template_man      = _p(file_path_Template_man)
+#     file_path_Template_man_1    = _p(file_path_Template_man_1)
+#     file_path_goodwill_template = _p(file_path_goodwill_template)
+
+#     df_P_L_ROP_NE           = _d(df_P_L_ROP_NE)
+#     df_P_L_HQ               = _d(df_P_L_HQ)
+#     df_OSP                  = _d(df_OSP)
+#     df_HMF_Managerial       = _d(df_HMF_Managerial)
+#     df_P_L_New_KPI          = _d(df_P_L_New_KPI)
+#     df_hQ_items             = _d(df_hQ_items)
+#     df_r_and_d              = _d(df_r_and_d)
+#     df_MZ_conso             = _d(df_MZ_conso)
+#     df_P_L_Relief           = _d(df_P_L_Relief)
+#     df_P_L_PL               = _d(df_P_L_PL)
+#     df_P_L_Reclass          = _d(df_P_L_Reclass)
+#     df_P_L_MCCP             = _d(df_P_L_MCCP)
+#     df_P_L_OCS              = _d(df_P_L_OCS)
+#     df_New_KPI_CFMI         = _d(df_New_KPI_CFMI)
+#     df_New_goodwill         = _d(df_New_goodwill)
+#     df_Act                  = _d(df_Act)
+#     df_1c_osp               = _d(df_1c_osp)
+#     df_high_variance_feuil  = _d(df_high_variance_feuil)
+#     df_Relief_KD            = _d(df_Relief_KD)
+#     df_Purchase_Price       = _d(df_Purchase_Price)
+#     df_UP_Calc              = _d(df_UP_Calc)
+#     df_nano_hfm             = _d(df_nano_hfm)
+#     df_itp                  = _d(df_itp)
+
+#     month_number = _int(month_number)
+#     adj          = (month_number - 4) % 12
+#     print("adj",adj)
+
+#     # ── Presence flags ────────────────────────────────────────────────────────
+#     HAS_ROP_NE    = _df_ok(df_P_L_ROP_NE,           "df_P_L_ROP_NE")
+#     HAS_HQ        = _df_ok(df_P_L_HQ,               "df_P_L_HQ")
+#     HAS_OSP       = _df_ok(df_OSP,                  "df_OSP")
+#     HAS_NEW_KPI   = _df_ok(df_P_L_New_KPI,          "df_P_L_New_KPI")
+#     HAS_HQ_ITEMS  = _df_ok(df_hQ_items,             "df_hQ_items")
+#     HAS_R_AND_D   = _df_ok(df_r_and_d,              "df_r_and_d")
+#     HAS_MZ        = _df_ok(df_MZ_conso,             "df_MZ_conso")
+#     HAS_RELIEF    = _df_ok(df_P_L_Relief,           "df_P_L_Relief")
+#     HAS_PL_PL     = _df_ok(df_P_L_PL,              "df_P_L_PL")
+#     HAS_RECLASS   = _df_ok(df_P_L_Reclass,         "df_P_L_Reclass")
+#     HAS_MCCP      = _df_ok(df_P_L_MCCP,            "df_P_L_MCCP")
+#     HAS_OCS       = _df_ok(df_P_L_OCS,             "df_P_L_OCS")
+#     HAS_FEUIL     = _df_ok(df_high_variance_feuil,  "df_high_variance_feuil")
+#     HAS_RELIEF_KD = _df_ok(df_Relief_KD,            "df_Relief_KD")
+#     HAS_ITP       = _df_ok(df_itp,                  "df_itp")
+#     HAS_NANO      = _df_ok(df_nano_hfm,             "df_nano_hfm")
+
+#     HAS_FILE_HQ_ITEM = _file_ok(file_HQ_Item,                    "HQ Item file")
+#     HAS_FILE_OSP     = _file_ok(file_path_OSP,                   "OSP file")
+#     HAS_FILE_PL      = _file_ok(file_path_P_L,                   "P&L file")
+#     HAS_FILE_TGK     = _file_ok(file_paths_OSP_TGK,              "OSP TGK file")
+#     HAS_FILE_HLV     = _file_ok(file_paths_High_Level_Variance,  "High_Level_Variance file")
+#     HAS_FILE_KD      = _file_ok(file_paths_Relief_KD,            "Relief KD file")
+#     HAS_FILE_PP      = _file_ok(file_paths_Purchase_Price,       "Purchase Price file")
+#     HAS_FILE_UP      = _file_ok(file_paths_UP_Calc,              "UP Calc file")
+#     HAS_FILE_NANO    = _file_ok(file_paths_NANO_HFM,             "NANO HFM file")
+#     HAS_FILE_ITP     = _file_ok(file_paths_ITP,                  "ITP file")
+#     HAS_TMPL_MAN     = _file_ok(file_path_Template_man,          "Template_man file")
+
+#     # ══════════════════════════════════════════════════════════════════════════
+#     #  STEP 1  –  COLUMN INDICES
+#     # ══════════════════════════════════════════════════════════════════════════
+#     logger.info("Step 1: resolving column indices")
+
+#     col_ROP_NE   = _safe_col_short(df_P_L_ROP_NE,  month_number, "df_P_L_ROP_NE")  if HAS_ROP_NE  else 0
+#     col_PL_PL    = _safe_col_short(df_P_L_PL,       month_number, "df_P_L_PL")      if HAS_PL_PL   else 0
+#     col_New_KPI  = _safe_col_short(df_P_L_New_KPI,  month_number, "df_P_L_New_KPI") if HAS_NEW_KPI else 0
+#     col_MZ_conso = _safe_col_short(df_MZ_conso,     month_number, "df_MZ_conso")    if HAS_MZ      else 0
+#     col_Reclass  = _safe_col_short(df_P_L_Reclass,  month_number, "df_P_L_Reclass") if HAS_RECLASS else 0
+#     col_Relief   = _int(4 + adj)
+
+#     col_r_and_d  = _safe_col_long(df_r_and_d,   month_number, "df_r_and_d")   if HAS_R_AND_D  else 0
+#     col_hq       = _safe_col_long(df_hQ_items,  month_number, "df_hQ_items")  if HAS_HQ_ITEMS else 0
+#     col_hq_tgt   = _safe_col_long(df_P_L_HQ,    month_number, "df_P_L_HQ")   if HAS_HQ       else 0
+#     col_mccp     = _safe_col_long(df_P_L_MCCP,  month_number, "df_P_L_MCCP") if HAS_MCCP     else 0
+#     col_ocp      = _safe_col_long(df_P_L_OCS,   month_number, "df_P_L_OCS")  if HAS_OCS      else 0
+
+#     col_osp_tgk   = _int(1 + adj)
+#     col_PL_write  = _int(col_PL_PL)
+#     col_KPI_write = _int(col_New_KPI + 1)
+
+#     # ══════════════════════════════════════════════════════════════════════════
+#     #  STEP 2  –  ROW INDICES
+#     # ══════════════════════════════════════════════════════════════════════════
+#     logger.info("Step 2: resolving row indices")
+
+#     # ── R&D (ROP NE) ──────────────────────────────────────────────────────────
+#     rd_rows = _safe_rd_terms(df_P_L_ROP_NE, "df_P_L_ROP_NE") if HAS_ROP_NE else {}
+#     row_func_rd    = _row_from_dict(rd_rows, "functional r&d",     "rd_rows(ROP_NE)")
+#     row_nonfunc_rd = _row_from_dict(rd_rows, "non functional r&d", "rd_rows(ROP_NE)")
+
+#     # ── R&D File ──────────────────────────────────────────────────────────────
+#     rd_file = _safe_rd_file(df_r_and_d, "df_r_and_d") if HAS_R_AND_D else {}
+#     # def _rdf(k): return _row_from_dict(rd_file, k, "rd_file_map")
+#     # row_func_rd_rev  = _rdf("functional r&d revenue")
+#     # row_func_rd_cost = _rdf("functional r&d cost")
+#     # row_nf_rd_rev    = _rdf("non functional r&d revenue")
+#     # row_nf_rd_cost   = _rdf("non functional r&d cost")
+       
+#     row_func_rd_rev  = 55
+#     row_func_rd_cost = 56
+#     row_nf_rd_rev    = 59
+#     row_nf_rd_cost   = 60
+
+#     # ── FMI ───────────────────────────────────────────────────────────────────
+#     (fmi_nis_nv, trn_nis_nv, cos_nis_nv, vme_nis_nv,
+#      fmi_dat_nv, trn_dat_nv, cos_dat_nv, vme_dat_nv,
+#      fmi_inf_nv, trn_inf_nv, cos_inf_nv, vme_inf_nv,
+#      fmi_tot_nv, trn_tot_nv, cos_tot_nv, vme_tot_nv,
+#      ) = (97, 22, 3, 4, 5, 6, 7, 8, 9, 10, 2, 3, 2, 1, 2, 3) if HAS_ROP_NE else (0,)*16
+
+#     (fmi_nis_uc, trn_nis_uc, cos_nis_uc, vme_nis_uc,
+#      fmi_dat_uc, trn_dat_uc, cos_dat_uc, vme_dat_uc,
+#      fmi_tot_uc, trn_tot_uc, cos_tot_uc, vme_tot_uc,
+#      ) = _safe_find_fmi_uc(df_P_L_ROP_NE, "df_P_L_ROP_NE") if HAS_ROP_NE else (0,)*12
+
+#     (fmi_nis_as, trn_nis_as, cos_nis_as, vme_nis_as,
+#      fmi_dat_as, trn_dat_as, cos_dat_as, vme_dat_as,
+#      fmi_inf_as, trn_inf_as, cos_inf_as, vme_inf_as,
+#      fmi_tot_as, trn_tot_as, cos_tot_as, vme_tot_as,
+#      ) = _safe_find_fmi_as(df_P_L_ROP_NE, "df_P_L_ROP_NE") if HAS_ROP_NE else (0,)*16
+
+#     (fmi_nis_ex, trn_nis_ex, cos_nis_ex, vme_nis_ex,
+#      fmi_dat_ex, trn_dat_ex, cos_dat_ex, vme_dat_ex,
+#      fmi_inf_ex, trn_inf_ex, cos_inf_ex, vme_inf_ex,
+#      fmi_tot_ex, trn_tot_ex, cos_tot_ex, vme_tot_ex,
+#      ) = _safe_find_fmi_export(df_P_L_ROP_NE, "df_P_L_ROP_NE") if HAS_ROP_NE else (0,)*16
+
+#     # ── HQ items ──────────────────────────────────────────────────────────────
+#     tp_list = [10] if HAS_HQ_ITEMS else [0]
+#     tp_base = 9   if HAS_HQ_ITEMS else 0
+
+#     # tax_list = _safe_tax(df_P_L_HQ, "df_P_L_HQ") if HAS_HQ else [0]
+#     # op_list  = _safe_op (df_P_L_HQ, "df_P_L_HQ") if HAS_HQ else [0]
+#     tax_list =[49]
+#     op_list  = [45]
+    
+
+#     tax_base = _int(tax_list[0]) if tax_list else 0
+#     op_base  = _int(op_list[0])  if op_list  else 0
+
+#     # ── Reclass ───────────────────────────────────────────────────────────────
+#     reclass_row = _int(_safe_reclass(df_P_L_Reclass, "df_P_L_Reclass")) if HAS_RECLASS else 0
+
+#     # ── Relief rows ───────────────────────────────────────────────────────────
+#     rel = _safe_relief(df_P_L_Relief, "df_P_L_Relief") if HAS_RELIEF else {}
+#     # def _rel(k): return _row_from_dict(rel, k, "relief_map")
+
+#     # row_rel_recall    = _rel("recall service/campaigns")
+#     # row_rel_kd_nmuk   = _rel("kd itp (nmuk)")
+#     # row_rel_kd_nmisa  = _rel("kd itp (nmisa)")
+#     # row_rel_kd_nmgr   = _rel("kd itp (nmgr)")
+#     # row_rel_conn      = _rel("connectivity")
+#     # row_rel_itp_nis   = _rel("itp cbu nissan")
+#     # row_rel_itp_inf   = _rel("itp cbu infiniti")
+#     # row_rel_iln_nmuk  = _rel("iln export (nmuk)")
+#     # row_rel_iln_nmisa = _rel("iln export (nmisa)")
+#     # row_rel_err_mz    = _rel("error correction in mz (?)")
+#     # row_rel_mz_imp    = _rel("mz impairment")
+#     # row_rel_ga_imp    = _rel("g&a impairment")
+#     # row_rel_cev       = _rel("compact ev/vt impairment")
+#     # row_rel_bat_nmuk  = _rel("battery 40 kw itp ( nmuk )")
+#     # row_rel_bat_nmisa = _rel("battery 40 kw itp ( nmisa )")
+#     # row_rel_bat_cancel= _rel("battery cancelation")
+#     # row_rel_err_wd5   = _rel("error correction in mz (after wd5)")
+#     # row_rel_top_daim  = _rel("top daimler correction (after wd5)")
+#     # row_rel_inf_fmi   = _rel("infiniti fmi correction (after wd5)")
+
+#     # ── OSP outside profit ────────────────────────────────────────────────────
+#     row_osp1, col_osp1 = (
+#         _safe_outside_profit(df_OSP, month_number, "df_OSP")
+#         if HAS_OSP else (0, 0)
+#     )
+#     row_osp2, col_osp2 = (
+#         _safe_outside_profit_2(df_OSP, month_number, "df_OSP")
+#         if HAS_OSP else (0, 0)
+#     )
+
+#     # ── Feuil1 ────────────────────────────────────────────────────────────────
+#     row_feuil, col_feuil_base = (
+#         _safe_feuil(df_high_variance_feuil, month_number, "df_high_variance_feuil")
+#         if HAS_FEUIL else (0, 0)
+#     )
+#     col_feuil = _int(col_feuil_base + 1 + adj) if col_feuil_base else 0
+
+#     # ── Relief KD ─────────────────────────────────────────────────────────────
+#     kd_cols = (
+#         _safe_relief_kd_cols(df_Relief_KD, month_number, "df_Relief_KD")
+#         if HAS_RELIEF_KD else [0, 0]
+#     )
+
+#     # ── ITP ───────────────────────────────────────────────────────────────────
+#     itp_rows = _safe_itp_rows(df_itp, "df_itp")               if HAS_ITP else [0]
+#     itp_cols = _safe_itp_cols(df_itp, month_number, "df_itp") if HAS_ITP else [0, 0]
+
+#     # ── NANO HFM ──────────────────────────────────────────────────────────────
+#     row_nano, col_nano = (
+#         _safe_nano(df_nano_hfm, month_number, "df_nano_hfm")
+#         if HAS_NANO else (0, 0)
+#     )
+
+#     # ── Energy ────────────────────────────────────────────────────────────────
+#     # energy_list = _safe_energy(df_hQ_items, "df_hQ_items") if HAS_HQ_ITEMS else [0]
+#     energy_list = [66]
+#     energy_row  = _int(energy_list[0]) if energy_list else 0
+
+#     # ══════════════════════════════════════════════════════════════════════════
+#     #  STEP 3  –  FORMULA STRINGS
+#     # ══════════════════════════════════════════════════════════════════════════
+#     logger.info("Step 3: building formula strings")
+
+#     SH = "ROP NE (Tagetik)"
+
+#     def fp(row: int) -> str:
+#         if not HAS_ROP_NE:
+#             z_audit.record("DF_MISSING", "HAS_ROP_NE is False", f"fp(row={row})")
+#             return Z
+#         if not col_ROP_NE:
+#             z_audit.record("COL_ZERO",
+#                            f"col_ROP_NE=0 (month {month_number} not found in ROP_NE)",
+#                            f"fp(row={row})")
+#             return Z
+#         return _safe_gen_formula(_int(row), col_ROP_NE, SH,
+#                                  context=f"fp(row={row})")
+
+#     def frd(row: int) -> str:
+#         if not HAS_R_AND_D:
+#             z_audit.record("DF_MISSING", "HAS_R_AND_D is False", f"frd(row={row})")
+#             return Z
+#         if not col_r_and_d:
+#             z_audit.record("COL_ZERO",
+#                            f"col_r_and_d=0 (month {month_number} not found in r_and_d)",
+#                            f"frd(row={row})")
+#             return Z
+#         return _safe_gen_formula(_int(row), col_r_and_d, "R&D",
+#                                  context=f"frd(row={row})")
+
+#     def focp(row: int) -> str:
+#         if not HAS_OCS:
+#             z_audit.record("DF_MISSING", "HAS_OCS is False", f"focp(row={row})")
+#             return Z
+#         if not col_ocp:
+#             z_audit.record("COL_ZERO",
+#                            f"col_ocp=0 (month {month_number} not found in OCS)",
+#                            f"focp(row={row})")
+#             return Z
+#         return _safe_gen_formula(_int(row), col_ocp, "OCS details",
+#                                  context=f"focp(row={row})")
+
+#     def fmccp(row: int) -> str:
+#         if not HAS_MCCP:
+#             z_audit.record("DF_MISSING", "HAS_MCCP is False", f"fmccp(row={row})")
+#             return Z
+#         if not col_mccp:
+#             z_audit.record("COL_ZERO",
+#                            f"col_mccp=0 (month {month_number} not found in MCCP)",
+#                            f"fmccp(row={row})")
+#             return Z
+#         return _safe_gen_formula(_int(row), col_mccp, "MCPP",
+#                                  context=f"fmccp(row={row})")
+
+#     def frel(row: int) -> str:
+#         row = _int(row)
+#         if not HAS_RELIEF:
+#             z_audit.record("DF_MISSING", "HAS_RELIEF is False", f"frel(row={row})")
+#             return Z
+#         if not row:
+#             z_audit.record("ROW_ZERO", "row=0 in frel() — key not found in relief_map",
+#                            f"frel(row={row})")
+#             return Z
+#         return _safe_gen_formula(row, col_Relief, "Relief",
+#                                  context=f"frel(row={row})")
+
+#     def freclass(row: int) -> str:
+#         row = _int(row)
+#         if not HAS_RECLASS:
+#             z_audit.record("DF_MISSING", "HAS_RECLASS is False", f"freclass(row={row})")
+#             return Z
+#         if not row:
+#             z_audit.record("ROW_ZERO", "reclass_row=0 — G_and_A_Reliev1 returned nothing",
+#                            f"freclass(row={row})")
+#             return Z
+#         if not col_Reclass:
+#             z_audit.record("COL_ZERO",
+#                            f"col_Reclass=0 (month {month_number} not found in Reclass sheet)",
+#                            f"freclass(row={row})")
+#             return Z
+#         return _safe_gen_formula(row, col_Reclass, "Reclass",
+#                                  context=f"freclass(row={row})")
+
+#     def fhq_tgt(row: int) -> str:
+#         row = _int(row)
+#         if not HAS_HQ:
+#             z_audit.record("DF_MISSING", "HAS_HQ is False", f"fhq_tgt(row={row})")
+#             return Z
+#         if not col_hq_tgt:
+#             z_audit.record("COL_ZERO",
+#                            f"col_hq_tgt=0 (month {month_number} not in HQ Tagetik)",
+#                            f"fhq_tgt(row={row})")
+#             return Z
+#         if not row:
+#             z_audit.record("ROW_ZERO", "row=0 in fhq_tgt()", f"fhq_tgt(row={row})")
+#             return Z
+#         return _safe_gen_formula(row, col_hq_tgt, "HQ Tagetik",
+#                                  context=f"fhq_tgt(row={row})")
+
+#     def fhq_item(offset: int) -> str:
+#         offset = _int(offset)
+#         row    = _int(tp_base) + offset
+#         if not HAS_HQ_ITEMS:
+#             z_audit.record("DF_MISSING", "HAS_HQ_ITEMS is False",
+#                            f"fhq_item(offset={offset})")
+#             return Z
+#         if not col_hq:
+#             z_audit.record("COL_ZERO",
+#                            f"col_hq=0 (month {month_number} not found in HQ_items sheet)",
+#                            f"fhq_item(offset={offset})")
+#             return Z
+#         if not tp_base:
+#             z_audit.record("ROW_ZERO",
+#                            "tp_base=0 — find_transfer_price_adjustment returned 0 or empty",
+#                            f"fhq_item(offset={offset})")
+#             return Z
+#         if not HAS_FILE_HQ_ITEM:
+#             z_audit.record("FILE_MISSING",
+#                            f"HQ Item file missing: {file_HQ_Item}",
+#                            f"fhq_item(offset={offset})")
+#             return Z
+#         if not row:
+#             z_audit.record("ROW_ZERO",
+#                            f"Computed row=0 (tp_base={tp_base} + offset={offset})",
+#                            f"fhq_item(offset={offset})")
+#             return Z
+#         return _safe_gen_formula(row, col_hq, "2026 MTD", file_HQ_Item,
+#                                  context=f"fhq_item(offset={offset})")
+
+#     # ── HQ items formula block ────────────────────────────────────────────────
+#     formula_hq_list = [fhq_item(o) for o in [5, 3, 6, 10, 18, 21, 22, 26, 4, 34, 1, 20]]
+#     valid_hq = [x[1:] for x in formula_hq_list if x != Z]
+#     formula_hq_sum = f"=({' + '.join(valid_hq)}) / 1000000" if valid_hq else Z
+#     if not valid_hq:
+#         z_audit.record("COMPOUND_Z",
+#                        "formula_hq_sum → Z because all 12 fhq_item() calls returned Z",
+#                        "formula_hq_sum assembly")
+
+#     # ── HQ Tagetik tax / operating profit ─────────────────────────────────────
+#     def ftax(offset):
+#         if not tax_base:
+#             z_audit.record("ROW_ZERO",
+#                            f"tax_base=0 — tax_and_public returned 0 (offset={offset})",
+#                            "ftax()")
+#             return Z
+#         return fhq_tgt(_int(tax_base) + _int(offset))
+
+#     def fop(offset):
+#         if not op_base:
+#             z_audit.record("ROW_ZERO",
+#                            f"op_base=0 — operating_profit returned 0 (offset={offset})",
+#                            "fop()")
+#             return Z
+#         return fhq_tgt(_int(op_base) + _int(offset))
+
+#     tax_parts = [x[1:] for x in [
+#         ftax(3), ftax(1), ftax(20), ftax(4), ftax(22), ftax(6),
+#         ftax(7), ftax(16), ftax(18),
+#         fop(0), fop(1), fop(2), fop(3),
+#     ] if x != Z]
+#     formula_hq_tax_sum = f"=({' + '.join(tax_parts)}) / 1000000" if tax_parts else Z
+#     if not tax_parts:
+#         z_audit.record("COMPOUND_Z",
+#                        "formula_hq_tax_sum → Z because all tax/op formula calls returned Z",
+#                        "formula_hq_tax_sum assembly")
+
+#     # ── Template extract helper ───────────────────────────────────────────────
+#     def _ex(sheet, row, col, label=""):
+#         row, col = _int(row), _int(col)
+#         if not HAS_TMPL_MAN:
+#             z_audit.record("FILE_MISSING",
+#                            f"Template_man file missing: {file_path_Template_man}",
+#                            label or f"_ex(sheet={sheet}, row={row}, col={col})")
+#             return Z
+#         return _safe_extract_formula(file_path_Template_man, sheet, row, col, label)
+
+#     SH_TGT = "HQ Tagetik"
+#     SH_REL = "New KPI Actual"
+
+#     hq_ex_1 = _ex(SH_TGT, 46, col_hq_tgt, "hq_ex_1")
+#     hq_ex_2 = _ex(SH_TGT, 47, col_hq_tgt, "hq_ex_2")
+#     hq_ex_3 = _ex(SH_TGT, 48, col_hq_tgt, "hq_ex_3")
+#     hq_ex_4 = _ex(SH_TGT, 49, col_hq_tgt, "hq_ex_4")
+
+#     # ── NANO / UP calc ────────────────────────────────────────────────────────
+#     _nano_raw = (
+#         _safe_gen_formula(row_nano, col_nano, "Actual", file_paths_NANO_HFM,
+#                           context="NANO formula")
+#         if (HAS_NANO and HAS_FILE_NANO and row_nano and col_nano) else Z
+#     )
+#     if _nano_raw == Z and not (HAS_NANO and HAS_FILE_NANO and row_nano and col_nano):
+#         missing = []
+#         if not HAS_NANO:      missing.append("df_nano_hfm absent")
+#         if not HAS_FILE_NANO: missing.append(f"NANO HFM file missing: {file_paths_NANO_HFM}")
+#         if not row_nano:      missing.append("row_nano=0")
+#         if not col_nano:      missing.append("col_nano=0")
+#         z_audit.record("DF_MISSING" if not HAS_NANO else
+#                        "FILE_MISSING" if not HAS_FILE_NANO else "ROW_ZERO",
+#                        "; ".join(missing), "NANO formula pre-check")
+#     f_nano = f"={_nano_raw[1:]}*10^3" if _nano_raw != Z else Z
+
+#     _up_raw = (_safe_gen_formula(18, 25, "UP_Calculation", file_paths_UP_Calc,
+#                                  context="UP_Calc formula")
+#                if HAS_FILE_UP else Z)
+#     if not HAS_FILE_UP:
+#         z_audit.record("FILE_MISSING",
+#                        f"UP Calc file missing: {file_paths_UP_Calc}",
+#                        "UP_Calc formula pre-check")
+#     f_up = f"={_up_raw[1:]}*10^6" if _up_raw != Z else Z
+
+#     _energy_offset = energy_row - tp_base
+#     if not (energy_row and tp_base):
+#         if not energy_row:
+#             z_audit.record("ROW_ZERO", "energy_row=0 — energy_tgk_68 returned 0", "f_energy")
+#         if not tp_base:
+#             z_audit.record("ROW_ZERO", "tp_base=0 — transfer price base row is 0", "f_energy")
+#     f_energy = fhq_item(_energy_offset) if (energy_row and tp_base) else Z
+
+#     # ── OSP formulas ──────────────────────────────────────────────────────────
+#     # _osp1_row = _int(row_osp1) - 5 if (_int(row_osp1) > 5) else 0
+#     # _osp2_row = _int(row_osp2) - 5 if (_int(row_osp2) > 5) else 0
+#     _osp1_row = 1
+#     _osp2_row = 1 
+
+
+#     # if _osp1_row < 0:
+#     #     z_audit.record("ROW_ZERO",
+#     #                    f"OSP row_osp1={row_osp1} <= 5, computed _osp1_row=0",
+#     #                    "f_osp1_raw")
+#     f_osp1_raw = (
+#         _safe_gen_formula_1(_osp1_row, _int(col_osp1), "Master",
+#                           context="f_osp1_raw")
+#         if (HAS_OSP and _osp1_row and col_osp1) else Z
+#     )
+#     # if _osp2_row<0:
+#     #     z_audit.record("ROW_ZERO",
+#     #                    f"OSP row_osp2={row_osp2} <= 5, computed _osp2_row=0",
+#     #                    "f_osp2_raw")
+#     f_osp2_raw = (
+#         _safe_gen_formula_1(_osp2_row, _int(col_osp2), "Master",
+#                           context="f_osp2_raw")
+#         if (HAS_OSP and _osp2_row and col_osp2) else Z
+#     )
+#     f_osp2 = f"=-{f_osp2_raw[1:]}" if f_osp2_raw != Z else Z
+
+#     f_ex_249  = _ex(SH_REL, 249, _int(col_KPI_write), "f_ex_249")
+#     f_249     = _safe_gen_formula_249(month_number, file_path_OSP) if HAS_FILE_OSP else Z
+#     if not HAS_FILE_OSP:
+#         z_audit.record("FILE_MISSING", f"OSP file missing for f_249: {file_path_OSP}", "f_249")
+#     f_sum249  = _compound(f_249, "-", f_ex_249, context="f_sum249")
+
+#     f_osp_ex1 = _ex(SH_REL, 239, _int(col_KPI_write)-1 , "f_osp_ex1")
+#     f_osp_sum = _compound(f_osp1_raw, "-", f_osp_ex1, context="f_osp_sum")
+
+#     # ── OCP ─────────────────────────────f_osp_ex1──────────────────────────────────────
+#     f_ocp1    = focp(74)
+#     f_ocp2    = focp(81)
+#     f_ocp_ex1 = _ex(SH_REL, 482, _int(col_KPI_write)-1 , "ocp_ex1")
+#     f_ocp_ex2 = _ex(SH_REL, 500, _int(col_KPI_write) , "ocp_ex2")
+
+#     _ocp_ab = " + ".join(x[1:] for x in [f_ocp1, f_ocp2] if x != Z)
+#     f_sum_ocp1 = (f"={f_ocp_ex1[1:]}-({_ocp_ab})/10^6" if (f_ocp_ex1 != Z and _ocp_ab)
+#                   else f_ocp_ex1 if f_ocp_ex1 != Z else Z)
+#     f_sum_ocp2 = (f"={f_ocp_ex2[1:]}+({_ocp_ab})/10^6" if (f_ocp_ex2 != Z and _ocp_ab)
+#                   else f_ocp_ex2 if f_ocp_ex2 != Z else Z)
+
+#     # ── OSP TGK ───────────────────────────────────────────────────────────────
+#     def _tgk(abs_row: int) -> str:
+#         r = _int(abs_row) - 2
+#         if not (HAS_FILE_TGK and r > 0 and col_osp_tgk):
+#             reasons = []
+#             if not HAS_FILE_TGK:  reasons.append(f"OSP TGK file missing: {file_paths_OSP_TGK}")
+#             if r <= 0:            reasons.append(f"computed row={r} <= 0 (abs_row={abs_row})")
+#             if not col_osp_tgk:   reasons.append(f"col_osp_tgk=0")
+#             z_audit.record("FILE_MISSING" if not HAS_FILE_TGK else "ROW_ZERO",
+#                            "; ".join(reasons), f"_tgk(abs_row={abs_row})")
+#             return Z
+#         return _safe_gen_formula(r, col_osp_tgk, "Summary", file_paths_OSP_TGK,
+#                                  context=f"_tgk(abs_row={abs_row})")
+
+#     f_tgk1 = _tgk(6);  f_tgk2 = _tgk(13)
+#     f_tgk3 = _tgk(20); f_tgk4 = _tgk(27)
+
+#     # ── High Level Variance / Feuil1 ─────────────────────────────────────────
+#     if not (HAS_FEUIL and HAS_FILE_HLV and row_feuil and col_feuil):
+#         reasons = []
+#         if not HAS_FEUIL:    reasons.append("df_high_variance_feuil absent")
+#         if not HAS_FILE_HLV: reasons.append(f"High_Level_Variance file missing: {file_paths_High_Level_Variance}")
+#         if not row_feuil:    reasons.append("row_feuil=0")
+#         if not col_feuil:    reasons.append(f"col_feuil=0 (col_feuil_base={col_feuil_base})")
+#         z_audit.record("DF_MISSING" if not HAS_FEUIL else "FILE_MISSING",
+#                        "; ".join(reasons), "f_relief_1 (Feuil1)")
+#     f_relief_1 = (
+#         _safe_gen_formula(row_feuil, col_feuil, "Feuil1", file_paths_High_Level_Variance,
+#                           context="f_relief_1")
+#         if (HAS_FEUIL and HAS_FILE_HLV and row_feuil and col_feuil) else Z
+#     )
+
+#     # ── Relief KD ─────────────────────────────────────────────────────────────
+#     def _kd(abs_row: int, col_idx: int) -> str:
+#         col = _int(kd_cols[col_idx]) if len(kd_cols) > col_idx else 0
+#         if not (HAS_RELIEF_KD and HAS_FILE_KD and abs_row and col):
+#             reasons = []
+#             if not HAS_RELIEF_KD: reasons.append("df_Relief_KD absent")
+#             if not HAS_FILE_KD:   reasons.append(f"Relief KD file missing: {file_paths_Relief_KD}")
+#             if not abs_row:        reasons.append(f"abs_row=0")
+#             if not col:            reasons.append(f"kd_cols[{col_idx}]=0")
+#             z_audit.record("DF_MISSING" if not HAS_RELIEF_KD else "FILE_MISSING",
+#                            "; ".join(reasons),
+#                            f"_kd(abs_row={abs_row}, col_idx={col_idx})")
+#             return Z
+#         return _safe_gen_formula(_int(abs_row), col, "Actuals vs FY25", file_paths_Relief_KD,
+#                                  context=f"_kd(abs_row={abs_row})")
+
+#     f_relief_2_raw = _kd(45, 0);  f_relief_3_raw = _kd(30, 0)
+#     f_relief_4_raw = _kd(15, 0);  f_relief_5_raw = _kd(45, 1)
+#     f_relief_6_raw = _kd(30, 1)
+
+#     f_ex_rel1 = _ex("Relief", 80, col_Relief, "relief_ex_row80")
+#     f_ex_rel5 = _ex("Relief", 87, col_Relief, "relief_ex_row87")
+
+#     _MONTH_ABBR = ["Jan","Feb","Mar","Apr","May","Jun",
+#                    "Jul","Aug","Sep","Oct","Nov","Dec"]
+#     month_abbr = _MONTH_ABBR[selected_month - 1]
+#     HFM = f"'HFM_{month_abbr}'!V8"
+
+#     if month_number == 4:
+#         f_relief_12 = f"={connectivity_var}"
+#         z_audit.record("DELIBERATE",
+#                        "month_number==4: f_relief_12 set to connectivity_var (no prior month)",
+#                        "f_relief_12")
+#     else:
+#         f_relief_12 = (
+#             f"=({connectivity_var})-{f_ex_rel5[1:]}"
+#             if f_ex_rel5 != Z else f"={connectivity_var}"
+#         )
+#         if f_ex_rel5 == Z:
+#             z_audit.record("COMPOUND_Z",
+#                            "f_ex_rel5 is Z → f_relief_12 falls back to connectivity_var only",
+#                            "f_relief_12")
+
+#     def _neg_div(raw: str, ex: str = Z, divisor: int = 1000,
+#                  context: str = "") -> str:
+#         if raw == Z:
+#             z_audit.record("COMPOUND_Z", f"raw formula is Z in _neg_div",
+#                            context or "_neg_div")
+#             return Z
+#         base = f"=-({raw[1:]}){f'/{divisor}'}"
+#         return f"{base}-{ex[1:]}" if ex != Z else base
+
+#     f_relief_2 = _neg_div(f_relief_2_raw, f_ex_rel1, context="f_relief_2")
+#     f_relief_3 = _neg_div(f_relief_3_raw,             context="f_relief_3")
+#     f_relief_4 = _neg_div(f_relief_4_raw,             context="f_relief_4")
+#     f_relief_5 = _neg_div(f_relief_5_raw,             context="f_relief_5")
+#     f_relief_6 = _neg_div(f_relief_6_raw,             context="f_relief_6")
+
+#     # ── ITP / Purchase Price ──────────────────────────────────────────────────
+#     _itp_r = _int(itp_rows[0]) if itp_rows else 0
+#     _itp_c = _int(itp_cols[0]) if itp_cols else 0
+#     if not (HAS_ITP and HAS_FILE_ITP and _itp_r and _itp_c):
+#         reasons = []
+#         if not HAS_ITP:      reasons.append("df_itp absent")
+#         if not HAS_FILE_ITP: reasons.append(f"ITP file missing: {file_paths_ITP}")
+#         if not _itp_r:       reasons.append("itp_rows[0]=0")
+#         if not _itp_c:       reasons.append("itp_cols[0]=0")
+#         if reasons:
+#             z_audit.record("DF_MISSING" if not HAS_ITP else "FILE_MISSING",
+#                            "; ".join(reasons), "f_relief_9")
+#     f_relief_9 = (
+#         _safe_gen_formula(_itp_r, _itp_c, "BP25", file_paths_ITP,
+#                           context="f_relief_9")
+#         if (HAS_ITP and HAS_FILE_ITP and _itp_r and _itp_c) else Z
+#     )
+
+#     if not HAS_FILE_PP:
+#         z_audit.record("FILE_MISSING",
+#                        f"Purchase Price file missing: {file_paths_Purchase_Price}",
+#                        "f_relief_10")
+#     _pp_raw = (_safe_gen_formula(14, 10, "Summary pivot", file_paths_Purchase_Price,
+#                                  context="Purchase Price")
+#                if HAS_FILE_PP else Z)
+#     f_relief_10 = f"=-({_pp_raw[1:]})/10^6" if _pp_raw != Z else Z
+
+#     # ── UED ───────────────────────────────────────────────────────────────────
+#     f_ued_tmpl = _ex("P&L Actual", 340, _int(col_PL_write), "UED_template")
+#     f_sum_UED  = (
+#         f"=({f_ued_tmpl[1:]})/1000"
+#         if (f_ued_tmpl != Z) else Z
+#     )
+#     if f_ued_tmpl == Z:
+#         z_audit.record("COMPOUND_Z", "f_ued_tmpl is Z → f_sum_UED falls to Z", "f_sum_UED")
+
+#     # ── MCCP ──────────────────────────────────────────────────────────────────
+#     f_mccp1 = fmccp(208)
+#     f_mccp2 = fmccp(322)
+
+#     # ── KPI Relief formulas ───────────────────────────────────────────────────
+#     # f_kpi_1   = frel(row_rel_mz_imp)
+#     # f_kpi_2   = frel(row_rel_ga_imp)
+#     # f_kpi_3   = freclass(reclass_row)
+#     # f_kpi_4   = frel(row_rel_iln_nmuk)
+#     # f_kpi_4_1 = frel(_int(row_rel_iln_nmuk) + 1) if row_rel_iln_nmuk else Z
+#     # f_kpi_5   = frel(row_rel_itp_inf)
+#     # f_kpi_6   = frel(row_rel_err_mz)
+#     # f_kpi_7   = frel(row_rel_kd_nmuk)
+#     # f_kpi_8   = frel(row_rel_kd_nmgr)
+#     # f_kpi_9   = frel(row_rel_kd_nmisa)
+#     # f_kpi_10  = frel(row_rel_bat_nmuk)
+#     # f_kpi_11  = frel(row_rel_bat_nmisa)
+#     # f_kpi_111 = frel(_int(row_rel_ga_imp) + 1) if row_rel_ga_imp else Z
+#     # f_kpi_12  = frel(row_rel_cev)
+#     # f_kpi_13  = frel(row_rel_itp_nis)
+#     # f_kpi_14  = frel(row_rel_bat_cancel)
+#     # f_kpi_15  = frel(row_rel_err_wd5)
+#     # f_kpi_16  = frel(row_rel_top_daim)
+#     # f_kpi_17  = frel(row_rel_inf_fmi)
+
+#     # f_kpi_18  = frel(row_rel_recall)
+#     # f_kpi_conn= frel(row_rel_conn)
+
+#     f_kpi_1   = frel(91)
+#     f_kpi_2   = frel(12)
+#     f_kpi_3   = frel(13)
+#     f_kpi_4   = frel(14)
+#     f_kpi_4_1 = frel(15)
+#     f_kpi_5   = frel(16)
+#     f_kpi_6   = frel(16)
+#     f_kpi_7   = frel(17)
+#     f_kpi_8   = frel(18)
+#     f_kpi_9   = frel(19)
+#     f_kpi_10  = frel(20)
+#     f_kpi_11  = frel(21)
+#     f_kpi_111 = frel(22)
+#     f_kpi_12  = frel(24)
+#     f_kpi_13  = frel(25)
+#     f_kpi_14  = frel(26)
+#     f_kpi_15  = frel(27)
+#     f_kpi_16  = frel(29)
+#     f_kpi_17  = frel(30)
+#     f_kpi_18  = frel(31)
+#     f_kpi_conn= frel(11)
+
+#     f_sum_kpi_1 = _join_sum(f_kpi_2, f_kpi_3,                               context="f_sum_kpi_1")
+#     f_sum_kpi_2 = _join_sum(f_kpi_4, f_kpi_4_1,                             context="f_sum_kpi_2")
+#     f_sum_kpi_3 = _join_sum(f_kpi_7, f_kpi_8, f_kpi_9, f_kpi_10, f_kpi_11, context="f_sum_kpi_3")
+#     f_sum_kpi_4 = _join_sum(f_kpi_conn, f_kpi_13,                           context="f_sum_kpi_4")
+#     f_sum_kpi_5 = _join_sum(f_kpi_14, f_kpi_15, f_kpi_16, f_kpi_17,        context="f_sum_kpi_5")
+
+#     # ══════════════════════════════════════════════════════════════════════════
+#     #  STEP 4  –  CELL UPDATE TABLES
+#     # ══════════════════════════════════════════════════════════════════════════
+#     logger.info("Step 4: building cell update tables")
+
+#     def _c(col0): return _int(col0) + 1
+
+#     # ── Reclass ───────────────────────────────────────────────────────────────
+#     col_rel_w = _c(col_Reclass)
+#     upd_reclass = (
+#         [
+#             (reclass_row - 2, col_rel_w, Var_Converter),
+#             (reclass_row + 1, col_rel_w, var_converter_bJPY),
+#             (reclass_row + 2, col_rel_w, var_converter_mEUR),
+#         ]
+#         if (HAS_RECLASS and reclass_row) else []
+#     )
+
+#     # ── Relief ────────────────────────────────────────────────────────────────
+#     col_rel_wr = _c(col_Relief)
+#     upd_relief = [
+#         (78,  col_rel_wr, ePWR_var),
+#         (75,  col_rel_wr, f_relief_1),
+#         (80,  col_rel_wr, f_relief_2),
+#         (81,  col_rel_wr, f_relief_3),
+#         (82,  col_rel_wr, f_relief_4),
+#         (83,  col_rel_wr, f_relief_5),
+#         (84,  col_rel_wr, f_relief_6),
+#         (87,  col_rel_wr, f_relief_12),
+#         (95,  col_rel_wr, f_relief_9),
+#         (96,  col_rel_wr, var_new_param_1),
+#         (97,  col_rel_wr, var_new_param_2),
+#     ]
+
+#     # ── HQ Tagetik ────────────────────────────────────────────────────────────
+#     col_hq_w = _c(col_hq_tgt)
+#     _hq_block_ok = bool(col_hq_tgt and HAS_HQ_ITEMS and col_hq and
+#                         tp_base and HAS_FILE_HQ_ITEM)
+#     if not _hq_block_ok and col_hq_tgt:
+#         reasons = []
+#         if not HAS_HQ_ITEMS:      reasons.append("df_hQ_items absent")
+#         if not col_hq:            reasons.append(f"col_hq=0 (month {month_number} not found)")
+#         if not tp_base:           reasons.append("tp_base=0")
+#         if not HAS_FILE_HQ_ITEM:  reasons.append(f"HQ Item file missing: {file_HQ_Item}")
+#         z_audit.record("DF_MISSING" if not HAS_HQ_ITEMS else "FILE_MISSING",
+#                        "HQ block rows 9-44 set to Z: " + "; ".join(reasons),
+#                        "upd_hq block assembly")
+
+#     upd_hq = (
+#         [
+#             *[(9 + i, col_hq_w,
+#                fhq_item(i - 1) if _hq_block_ok else Z)
+#               for i in range(36)],
+#             (46, col_hq_w, hq_ex_1), (47, col_hq_w, hq_ex_2),
+#             (48, col_hq_w, hq_ex_3), (49, col_hq_w, hq_ex_4),
+#             (52, col_hq_w, f_nano),
+#             (54, col_hq_w, f_up),
+#             (67, col_hq_w, f_energy),
+#             (69, col_hq_w, cafe_penalty_var),
+#         ]
+#         if col_hq_tgt else []
+#     )
+
+#     # ── P&L Actual ────────────────────────────────────────────────────────────
+#     col_pl = _c(col_PL_write)
+#     upd_pl = [
+#         (304, col_pl, fp(row_func_rd)),    (305, col_pl, fp(row_nonfunc_rd)),
+#         (307, col_pl, frd(row_func_rd_rev)),  (308, col_pl, frd(row_func_rd_cost)),
+#         (309, col_pl, frd(row_nf_rd_rev)),    (310, col_pl, frd(row_nf_rd_cost)),
+#         (338, col_pl, formula_hq_sum),
+#         (339, col_pl, formula_hq_tax_sum),
+#         (340, col_pl, f_sum_UED),
+#     ]
+
+#     # ── New KPI Actual ────────────────────────────────────────────────────────
+#     col_kpi = _c(col_KPI_write-1)
+#     upd_kpi = [
+#         # (42,  col_kpi, f_kpi_1),
+#         # (45,  col_kpi, f_sum_kpi_1),
+#         (205, col_kpi, f_mccp1),
+#         (239, col_kpi, f_osp_sum),
+#         (249, col_kpi, f_sum249),
+#         (263, col_kpi, f_osp2),
+#         (319, col_kpi, f_mccp2),
+#         # (382, col_kpi, f_sum_kpi_2),
+#         # (383, col_kpi, f_kpi_6),
+#         # (384, col_kpi, f_sum_kpi_3),
+#         # (387, col_kpi, f_kpi_111),
+#         # (390, col_kpi, f_kpi_12),
+#         # (391, col_kpi, f_sum_kpi_4),
+#         # (394, col_kpi, f_sum_kpi_5),
+#         # (402, col_kpi, f_kpi_5),
+#         # (421, col_kpi, f_kpi_18),
+#         # (482, col_kpi, f_sum_ocp1),
+#         # (500, col_kpi, f_sum_ocp2),
+#         (532, col_kpi, f_tgk1),
+#         (533, col_kpi, f_tgk2),
+#         (534, col_kpi, f_tgk3),
+#     ]
+
+#     # ══════════════════════════════════════════════════════════════════════════
+#     #  STEP 5  –  WRITE OUTPUT FILE
+#     # ══════════════════════════════════════════════════════════════════════════
+#     logger.info("Step 5: writing output file")
+
+#     sheet_names = ["Reclass", "Relief", "HQ Tagetik", "P&L Actual", "New KPI Actual"]
+#     all_updates = [upd_reclass, upd_relief, upd_hq, upd_pl, upd_kpi]
+
+#     legacy_path, result_path = paste_values_KPI_PL(
+#         file_path_Template, sheet_names, all_updates, month_number, output_path,
+#     )
+#     logger.info(f"P&L output written → {result_path}  ({time.time()-t0:.1f}s)")
+
+#     audit_report_path = z_audit.write_report(output_path)
+#     logger.info(f"Z-Audit report → {audit_report_path}")
+
+#     # ══════════════════════════════════════════════════════════════════════════
+#     #  STEP 6  –  HAND OFF TO ACT
+#     # ══════════════════════════════════════════════════════════════════════════
+#     logger.info("Step 6: calling ACT")
+
+#     ACT(
+#         file_path_P_L, legacy_path,
+#         df_P_L_ROP_NE, df_P_L_HQ,
+#         file_path_OSP, df_OSP,
+#         file_path_HMF, df_HMF_Managerial,
+#         file_path_New_KPI, df_P_L_New_KPI,
+#         file_HQ_Item, df_hQ_items,
+#         file_goodwill,
+#         df_r_and_d, df_MZ_conso, df_P_L_Relief,
+#         df_P_L_PL, df_P_L_Reclass, df_P_L_MCCP, df_P_L_OCS,
+#         df_New_KPI_CFMI, df_New_goodwill, df_Act,
+#         df_1c_osp,
+#         file_paths_High_Level_Variance, df_high_variance_feuil,
+#         file_paths_Relief_KD, df_Relief_KD,
+#         file_paths_Purchase_Price, df_Purchase_Price,
+#         file_paths_UP_Calc, df_UP_Calc,
+#         file_paths_NANO_HFM, df_nano_hfm,
+#         file_paths_ITP, df_itp,
+#         file_path_Template, file_path_Template_1,
+#         month_number, Var_Converter, var_Cfmi,
+#         file_path_Template_man_1, file_path_goodwill_template,
+#         result_path, output_path,
+#     )
+
+
+
+
+
+
+
+
+
+
+from __future__ import annotations
+
+import os
+import time
+import datetime
+from collections import defaultdict
+from typing import Optional
+
+import pandas as pd
+
+from Submit_2_Helper_function import (
+    find_row_numbers,
+    find_fmi_row_uc,
+    find_fmi_row_as,
+    find_fmi_row_export,
+    find_financial_indices,
+    find_oem_terms,
+    find_ocs_terms,
+    search_rd_terms,
+    find_R_and_D_File,
+    tax_and_public,
+    operating_profit,
+    relief_search_terms_new,
+    G_and_A_Reliev1,
+    export_ITP_Export,
+    energy_tgk_68,
+    find_columns_with_month_short,
+    find_columns_with_month_long,
+    find_month_columns_Relief_KD,
+    find_month_columns_export,
+    find_indices_feuil,
+    find_op_and_month,
+    find_outside_profit_and_month_value,
+    find_second_column_for_outside_profit,
+    generate_excel_formula,
+    generate_excel_formula_249,
+    extract_formula,
+    extract_value_formula_latest,
+    manage_sheet_visibility,
+    paste_values_KPI_PL,
+)
+from ACT import ACT
+from utils.logger import logger
+
+logger.info("Submit_2 triggered")
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  SENTINEL
+# ─────────────────────────────────────────────────────────────────────────────
+Z = "=0"   # written to cells when data is unavailable
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Z-AUDIT SYSTEM
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ZAudit:
+    """
+    Collects all reasons why Z ("=0") was written instead of a real formula.
+
+    Categories
+    ----------
+    FILE_MISSING     : a file path was empty or the file did not exist on disk
+    DF_MISSING       : a DataFrame was None / not a DataFrame / empty
+    ROW_ZERO         : a row index resolved to 0 (key not found in search dict)
+    COL_ZERO         : a column index resolved to 0 (month column not found)
+    ROW_AND_COL_ZERO : both row and col were 0
+    INT_CONVERT_FAIL : _int() could not parse a value (fell back to 0)
+    EXCEPTION        : an unexpected exception inside a safe wrapper
+    COMPOUND_Z       : a compound formula (e.g. a-b) where one operand was Z
+    DELIBERATE       : explicitly set to Z by business logic (not a data gap)
+    """
+
+    CATEGORIES = [
+        "FILE_MISSING",
+        "DF_MISSING",
+        "ROW_ZERO",
+        "COL_ZERO",
+        "ROW_AND_COL_ZERO",
+        "INT_CONVERT_FAIL",
+        "EXCEPTION",
+        "COMPOUND_Z",
+        "DELIBERATE",
+    ]
+
+    def __init__(self):
+        self.records: dict[str, list[tuple[str, str]]] = defaultdict(list)
+        self._start = datetime.datetime.now()
+
+    def record(self, category: str, detail: str, context: str = "") -> None:
+        self.records[category].append((detail, context))
+        logger.debug(f"[Z-AUDIT] {category} | {detail} | ctx={context}")
+
+    def write_report(self, output_dir: str) -> str:
+        os.makedirs(output_dir, exist_ok=True)
+        ts = self._start.strftime("%Y%m%d_%H%M%S")
+        report_path = os.path.join(output_dir, f"zero_population_audit_{ts}.txt")
+
+        total = sum(len(v) for v in self.records.values())
+        lines = [
+            "=" * 78,
+            "  ZERO POPULATION AUDIT REPORT",
+            f"  Generated : {self._start.strftime('%Y-%m-%d %H:%M:%S')}",
+            f"  Total =0  : {total} occurrences",
+            "=" * 78,
+            "",
+            "HOW TO READ THIS REPORT",
+            "-" * 78,
+            "Each section lists one CATEGORY of reason why a cell got =0.",
+            "Under each category you will find:",
+            "  DETAIL  – the specific missing piece (file path, df name, value)",
+            "  CONTEXT – which formula builder / cell / helper was affected",
+            "",
+            "QUICK DIAGNOSIS GUIDE",
+            "-" * 78,
+            "  FILE_MISSING     → The file path was '' or the file does not exist.",
+            "                     Check that the path is passed correctly to the",
+            "                     function and that the file has been saved/exported.",
+            "",
+            "  DF_MISSING       → The DataFrame was None, not a DataFrame, or empty.",
+            "                     The upstream loader probably returned nothing.",
+            "                     Check the sheet name / file used to build that DF.",
+            "",
+            "  ROW_ZERO         → A row key was not found in the search dictionary.",
+            "                     The label in the source file may have changed or",
+            "                     a search function did not match the expected text.",
+            "",
+            "  COL_ZERO         → The month column was not found in the DataFrame.",
+            "                     Check that month headers exist in the source sheet.",
+            "",
+            "  ROW_AND_COL_ZERO → Both row and column were 0 simultaneously.",
+            "",
+            "  INT_CONVERT_FAIL → A value that should be a row/col number could not",
+            "                     be converted to int (e.g. was a string like 'N/A').",
+            "",
+            "  EXCEPTION        → An unexpected Python exception inside a safe wrapper.",
+            "                     Check the main log for the full traceback.",
+            "",
+            "  COMPOUND_Z       → A combined formula (e.g. A - B) where at least one",
+            "                     component was already Z, so the whole formula is Z.",
+            "",
+            "  DELIBERATE       → Intentionally set to Z by business logic (not a bug).",
+            "",
+            "=" * 78,
+            "",
+        ]
+
+        for cat in self.CATEGORIES:
+            entries = self.records.get(cat, [])
+            lines.append(f"{'─'*78}")
+            lines.append(f"  {cat}  ({len(entries)} occurrences)")
+            lines.append(f"{'─'*78}")
+            if not entries:
+                lines.append("  (none)")
+            else:
+                counts: dict[tuple, int] = defaultdict(int)
+                for entry in entries:
+                    counts[entry] += 1
+                for (detail, context), cnt in sorted(counts.items(), key=lambda x: -x[1]):
+                    prefix = f"  x{cnt:>3}  " if cnt > 1 else "         "
+                    lines.append(f"{prefix}DETAIL : {detail}")
+                    if context:
+                        lines.append(f"         CONTEXT: {context}")
+                    lines.append("")
+            lines.append("")
+
+        lines.append("=" * 78)
+        lines.append("  SUMMARY BY CATEGORY")
+        lines.append("=" * 78)
+        for cat in self.CATEGORIES:
+            n = len(self.records.get(cat, []))
+            if n:
+                lines.append(f"  {cat:<22} : {n:>5}")
+        lines.append(f"  {'TOTAL':<22} : {total:>5}")
+        lines.append("=" * 78)
+
+        report_text = "\n".join(lines)
+        with open(report_path, "w", encoding="utf-8") as fh:
+            fh.write(report_text)
+
+        logger.info(f"Z-Audit report written → {report_path}  ({total} zero events)")
+        return report_path
+
+
+# Module-level singleton
+z_audit = ZAudit()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  LAYER 3  –  INTEGER GUARDRAIL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _int(v, context: str = "") -> int:
+    if v is None:
+        return 0
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        msg = f"could not convert {v!r} to int"
+        logger.warning(f"_int(): {msg} – using 0")
+        z_audit.record("INT_CONVERT_FAIL", msg, context)
+        return 0
+
+
+def _int_list(lst, context: str = "") -> list:
+    if not lst:
+        return [0]
+    return [_int(x, context) for x in lst]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  LAYER 1  –  INPUT CHECKERS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _df_ok(df, name: str) -> bool:
+    if df is None:
+        logger.warning(f"[SKIP] DataFrame '{name}' is None – cells → =0")
+        z_audit.record("DF_MISSING", f"DataFrame '{name}' is None",
+                       f"presence check for {name}")
+        return False
+    if not isinstance(df, pd.DataFrame):
+        logger.warning(f"[SKIP] DataFrame '{name}' is not a DataFrame ({type(df)}) – cells → =0")
+        z_audit.record("DF_MISSING",
+                       f"DataFrame '{name}' has wrong type: {type(df).__name__}",
+                       f"presence check for {name}")
+        return False
+    if df.empty:
+        logger.warning(f"[SKIP] DataFrame '{name}' is empty – cells → =0")
+        z_audit.record("DF_MISSING", f"DataFrame '{name}' is empty (0 rows)",
+                       f"presence check for {name}")
+        return False
+    return True
+
+
+def _file_ok(path: str, name: str) -> bool:
+    if not path:
+        logger.warning(f"[SKIP] File '{name}' path is empty – formulas → =0")
+        z_audit.record("FILE_MISSING",
+                       f"File '{name}': path is empty string",
+                       f"presence check for {name}")
+        return False
+    if not os.path.isfile(path):
+        logger.warning(f"[SKIP] File '{name}' not found at {path!r} – formulas → =0")
+        z_audit.record("FILE_MISSING",
+                       f"File '{name}' not found on disk: {path}",
+                       f"presence check for {name}")
+        return False
+    return True
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  LAYER 2  –  SAFE WRAPPERS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _safe_col_short(df, month, name):
+    if not _df_ok(df, name): return 0
+    try:
+        result = _int(find_columns_with_month_short(df, month),
+                      f"find_columns_with_month_short({name})")
+        if result == 0:
+            z_audit.record("COL_ZERO",
+                           f"Month {month} not found in '{name}' (short header search)",
+                           f"find_columns_with_month_short({name})")
+        return result
+    except Exception as e:
+        logger.warning(f"find_columns_with_month_short({name}): {e}")
+        z_audit.record("EXCEPTION", str(e), f"find_columns_with_month_short({name})")
+        return 0
+
+def _safe_col_long(df, month, name):
+    if not _df_ok(df, name): return 0
+    try:
+        result = _int(find_columns_with_month_long(df, month),
+                      f"find_columns_with_month_long({name})")
+        if result == 0:
+            z_audit.record("COL_ZERO",
+                           f"Month {month} not found in '{name}' (long header search)",
+                           f"find_columns_with_month_long({name})")
+        return result
+    except Exception as e:
+        logger.warning(f"find_columns_with_month_long({name}): {e}")
+        z_audit.record("EXCEPTION", str(e), f"find_columns_with_month_long({name})")
+        return 0
+
+def _safe_find_row_numbers(df, name) -> dict:
+    if not _df_ok(df, name): return {}
+    try:    return find_row_numbers(df) or {}
+    except Exception as e:
+        logger.warning(f"find_row_numbers({name}): {e}")
+        z_audit.record("EXCEPTION", str(e), f"find_row_numbers({name})")
+        return {}
+
+def _safe_find_fmi_uc(df, name):
+    if not _df_ok(df, name): return (0,)*12
+    try:    return tuple(_int(x, f"fmi_uc({name})") for x in find_fmi_row_uc(df))
+    except Exception as e:
+        logger.warning(f"find_fmi_row_uc({name}): {e}")
+        z_audit.record("EXCEPTION", str(e), f"find_fmi_row_uc({name})")
+        return (0,)*12
+
+def _safe_find_fmi_as(df, name):
+    if not _df_ok(df, name): return (0,)*16
+    try:    return tuple(_int(x, f"fmi_as({name})") for x in find_fmi_row_as(df))
+    except Exception as e:
+        logger.warning(f"find_fmi_row_as({name}): {e}")
+        z_audit.record("EXCEPTION", str(e), f"find_fmi_row_as({name})")
+        return (0,)*16
+
+def _safe_find_fmi_export(df, name):
+    if not _df_ok(df, name): return (0,)*16
+    try:    return tuple(_int(x, f"fmi_export({name})") for x in find_fmi_row_export(df))
+    except Exception as e:
+        logger.warning(f"find_fmi_row_export({name}): {e}")
+        z_audit.record("EXCEPTION", str(e), f"find_fmi_row_export({name})")
+        return (0,)*16
+
+def _safe_financial_indices(df, name):
+    if not _df_ok(df, name): return ([0],[0],[0],[0],[0])
+    try:
+        result = find_financial_indices(df)
+        return tuple(_int_list(lst, f"financial_indices({name})") for lst in result)
+    except Exception as e:
+        logger.warning(f"find_financial_indices({name}): {e}")
+        z_audit.record("EXCEPTION", str(e), f"find_financial_indices({name})")
+        return ([0],[0],[0],[0],[0])
+
+def _safe_oem_terms(df, name):
+    if not _df_ok(df, name): return ([0],[0],[0],[0],[0],[0],[0],[0])
+    try:
+        result = find_oem_terms(df)
+        return tuple(_int_list(lst, f"oem_terms({name})") for lst in result)
+    except Exception as e:
+        logger.warning(f"find_oem_terms({name}): {e}")
+        z_audit.record("EXCEPTION", str(e), f"find_oem_terms({name})")
+        return ([0],[0],[0],[0],[0],[0],[0],[0])
+
+def _safe_ocs_terms(df, name):
+    if not _df_ok(df, name): return [0]
+    try:    return _int_list(find_ocs_terms(df) or [0], f"ocs_terms({name})")
+    except Exception as e:
+        logger.warning(f"find_ocs_terms({name}): {e}")
+        z_audit.record("EXCEPTION", str(e), f"find_ocs_terms({name})")
+        return [0]
+
+def _safe_rd_terms(df, name) -> dict:
+    if not _df_ok(df, name): return {}
+    try:    return search_rd_terms(df) or {}
+    except Exception as e:
+        logger.warning(f"search_rd_terms({name}): {e}")
+        z_audit.record("EXCEPTION", str(e), f"search_rd_terms({name})")
+        return {}
+
+def _safe_rd_file(df, name) -> dict:
+    if not _df_ok(df, name): return {}
+    try:    return find_R_and_D_File(df) or {}
+    except Exception as e:
+        logger.warning(f"find_R_and_D_File({name}): {e}")
+        z_audit.record("EXCEPTION", str(e), f"find_R_and_D_File({name})")
+        return {}
+
+def _safe_tax(df, name):
+    if not _df_ok(df, name): return [0]
+    try:    return _int_list(tax_and_public(df) or [0], f"tax_and_public({name})")
+    except Exception as e:
+        logger.warning(f"tax_and_public({name}): {e}")
+        z_audit.record("EXCEPTION", str(e), f"tax_and_public({name})")
+        return [0]
+
+def _safe_op(df, name):
+    if not _df_ok(df, name): return [0]
+    try:    return _int_list(operating_profit(df) or [0], f"operating_profit({name})")
+    except Exception as e:
+        logger.warning(f"operating_profit({name}): {e}")
+        z_audit.record("EXCEPTION", str(e), f"operating_profit({name})")
+        return [0]
+
+def _safe_reclass(df, name) -> int:
+    if not _df_ok(df, name): return 0
+    try:
+        r = G_and_A_Reliev1(df)
+        return _int(r, f"reclass({name})") if r is not None else 0
+    except Exception as e:
+        logger.warning(f"G_and_A_Reliev1({name}): {e}")
+        z_audit.record("EXCEPTION", str(e), f"G_and_A_Reliev1({name})")
+        return 0
+
+def _safe_relief(df, name) -> dict:
+    if not _df_ok(df, name): return {}
+    try:    return relief_search_terms_new(df) or {}
+    except Exception as e:
+        logger.warning(f"relief_search_terms_new({name}): {e}")
+        z_audit.record("EXCEPTION", str(e), f"relief_search_terms_new({name})")
+        return {}
+
+def _safe_outside_profit(df, month, name):
+    if not _df_ok(df, name): return (0, 0)
+    try:
+        r, c = find_outside_profit_and_month_value(df, month)
+        return (_int(r, f"osp_row({name})"), _int(c, f"osp_col({name})"))
+    except Exception as e:
+        logger.warning(f"find_outside_profit_and_month_value({name}): {e}")
+        z_audit.record("EXCEPTION", str(e), f"find_outside_profit_and_month_value({name})")
+        return (0, 0)
+
+def _safe_outside_profit_2(df, month, name):
+    if not _df_ok(df, name): return (0, 0)
+    try:
+        r, c = find_second_column_for_outside_profit(df, month)
+        return (_int(r, f"osp2_row({name})"), _int(c, f"osp2_col({name})"))
+    except Exception as e:
+        logger.warning(f"find_second_column_for_outside_profit({name}): {e}")
+        z_audit.record("EXCEPTION", str(e), f"find_second_column_for_outside_profit({name})")
+        return (0, 0)
+
+def _safe_feuil(df, month, name):
+    if not _df_ok(df, name): return (0, 0)
+    try:
+        r, c = find_indices_feuil(df, month)
+        return (_int(r, f"feuil_row({name})"), _int(c, f"feuil_col({name})"))
+    except Exception as e:
+        logger.warning(f"find_indices_feuil({name}): {e}")
+        z_audit.record("EXCEPTION", str(e), f"find_indices_feuil({name})")
+        return (0, 0)
+
+def _safe_relief_kd_cols(df, month, name):
+    if not _df_ok(df, name): return [0, 0]
+    try:    return _int_list(find_month_columns_Relief_KD(df, month) or [0, 0], f"relief_kd_cols({name})")
+    except Exception as e:
+        logger.warning(f"find_month_columns_Relief_KD({name}): {e}")
+        z_audit.record("EXCEPTION", str(e), f"find_month_columns_Relief_KD({name})")
+        return [0, 0]
+
+def _safe_itp_rows(df, name):
+    if not _df_ok(df, name): return [0]
+    try:    return _int_list(export_ITP_Export(df) or [0], f"itp_rows({name})")
+    except Exception as e:
+        # logger.warning(f"export_ITP_Export({name}): {e}")
+        # z_audit.record("EXCEPTION", str(e), f"export_ITP_Export({name})")
+        return [0]
+
+def _safe_itp_cols(df, month, name):
+    if not _df_ok(df, name): return [0, 0]
+    try:    return _int_list(find_month_columns_export(df, month) or [0, 0], f"itp_cols({name})")
+    except Exception as e:
+        # logger.warning(f"find_month_columns_export({name}): {e}")
+        # z_audit.record("EXCEPTION", str(e), f"find_month_columns_export({name})")
+        return [0, 0]
+
+def _safe_nano(df, month, name):
+    if not _df_ok(df, name): return (0, 0)
+    try:
+        r, c = find_op_and_month(df, month)
+        return (_int(r, f"nano_row({name})"), _int(c, f"nano_col({name})"))
+    except Exception as e:
+        logger.warning(f"find_op_and_month({name}): {e}")
+        z_audit.record("EXCEPTION", str(e), f"find_op_and_month({name})")
+        return (0, 0)
+
+def _safe_energy(df, name):
+    if not _df_ok(df, name): return [0]
+    try:    return _int_list(energy_tgk_68(df) or [0], f"energy({name})")
+    except Exception as e:
+        logger.warning(f"energy_tgk_68({name}): {e}")
+        z_audit.record("EXCEPTION", str(e), f"energy_tgk_68({name})")
+        return [0]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  LAYER 4  –  SAFE FORMULA BUILDERS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _safe_gen_formula(row: int, col: int, sheet: str,
+                      file_path: str = "", context: str = "") -> str:
+    row, col = _int(row, context), _int(col, context)
+
+    if not row and not col:
+        z_audit.record("ROW_AND_COL_ZERO",
+                       f"row=0 AND col=0 for sheet='{sheet}'",
+                       context or f"generate_excel_formula(sheet={sheet})")
+        return Z
+    if not row:
+        z_audit.record("ROW_ZERO",
+                       f"row=0 for sheet='{sheet}' col={col}",
+                       context or f"generate_excel_formula(sheet={sheet}, col={col})")
+        return Z
+    if not col:
+        z_audit.record("COL_ZERO",
+                       f"col=0 for sheet='{sheet}' row={row}",
+                       context or f"generate_excel_formula(sheet={sheet}, row={row})")
+        return Z
+
+    if file_path and not _file_ok(file_path, f"cross-wb [{sheet}]"):
+        z_audit.record("FILE_MISSING",
+                       f"Cross-workbook file missing: {file_path}",
+                       context or f"generate_excel_formula(sheet={sheet}, r={row}, c={col})")
+        return Z
+
+    try:
+        return generate_excel_formula(row, col, sheet,
+                                      file_path if file_path else None)
+    except Exception as e:
+        logger.warning(f"generate_excel_formula(r={row},c={col},{sheet}): {e}")
+        z_audit.record("EXCEPTION", str(e),
+                       context or f"generate_excel_formula(r={row},c={col},sheet={sheet})")
+        return Z
+
+def _safe_gen_formula_1(row: int, col: int, sheet: str,
+                      file_path: str = "", context: str = "") -> str:
+    # row, col = _int(row, context), _int(col, context)
+    return generate_excel_formula(row-1, col, sheet,
+                                      file_path if file_path else None)
+
+   
+
+
+def _safe_extract_formula(file_path: str, sheet: str,
+                          row: int, col: int, label: str = "") -> str:
+    row, col = _int(row, label), _int(col, label)
+    if not row and not col:
+        z_audit.record("ROW_AND_COL_ZERO",
+                       f"row=0 AND col=0 for extract_formula(sheet={sheet})", label)
+        return Z
+    if not row:
+        z_audit.record("ROW_ZERO",
+                       f"row=0 for extract_formula(sheet={sheet}, col={col})", label)
+        return Z
+    if not col:
+        z_audit.record("COL_ZERO",
+                       f"col=0 for extract_formula(sheet={sheet}, row={row})", label)
+        return Z
+    if not _file_ok(file_path, label or f"template extract({sheet},{row},{col})"):
+        z_audit.record("FILE_MISSING",
+                       f"Template file missing for extract_formula: {file_path}",
+                       label or f"extract_formula(sheet={sheet}, r={row}, c={col})")
+        return Z
+    try:
+        result = extract_formula(file_path, sheet, row, col)
+        return result if result else Z
+    except Exception as e:
+        logger.warning(f"extract_formula({sheet},{row},{col}): {e}")
+        z_audit.record("EXCEPTION", str(e),
+                       label or f"extract_formula(sheet={sheet}, r={row}, c={col})")
+        return Z
+
+
+def _safe_extract_value_formula(file_path: str, month: int) -> str:
+    if not _file_ok(file_path, "P&L file for extract_value_formula_latest"):
+        z_audit.record("FILE_MISSING",
+                       f"P&L file missing: {file_path}",
+                       f"extract_value_formula_latest(month={month})")
+        return Z
+    try:
+        r = extract_value_formula_latest(file_path, month)
+        return r if r else Z
+    except Exception as e:
+        logger.warning(f"extract_value_formula_latest: {e}")
+        z_audit.record("EXCEPTION", str(e),
+                       f"extract_value_formula_latest(month={month})")
+        return Z
+
+
+def _safe_gen_formula_249(month: int, file_path_OSP: str) -> str:
+    if not _file_ok(file_path_OSP, "OSP file for generate_excel_formula_249"):
+        z_audit.record("FILE_MISSING",
+                       f"OSP file missing: {file_path_OSP}",
+                       f"generate_excel_formula_249(month={month})")
+        return Z
+    try:
+        r = generate_excel_formula_249(month, file_path_OSP)
+        return r if r else Z
+    except Exception as e:
+        logger.warning(f"generate_excel_formula_249: {e}")
+        z_audit.record("EXCEPTION", str(e),
+                       f"generate_excel_formula_249(month={month})")
+        return Z
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  COMPOUND FORMULA HELPERS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _join_sum(*formulas, context: str = "") -> str:
+    parts = [x[1:] for x in formulas if x and x != Z]
+    zeros = [i for i, x in enumerate(formulas) if x == Z]
+    if zeros and context:
+        z_audit.record("COMPOUND_Z",
+                       f"Operand(s) at index {zeros} were Z in _join_sum",
+                       context)
+    return f"={'  +  '.join(parts)}" if parts else Z
+
+
+def _compound(a: str, op: str, b: str, context: str = "") -> str:
+    if a == Z or b == Z:
+        missing = []
+        if a == Z: missing.append("left operand")
+        if b == Z: missing.append("right operand")
+        z_audit.record("COMPOUND_Z",
+                       f"_compound({op}): {' and '.join(missing)} is Z",
+                       context)
+        return Z
+    return f"={a[1:]}{op}{b[1:]}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DICT-ROW EXTRACTOR
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _row_from_dict(d: dict, key: str, dict_name: str = "") -> int:
+    try:
+        val = d.get(key)
+        if not val:
+            if d:
+                z_audit.record("ROW_ZERO",
+                               f"Key '{key}' not found in search dict",
+                               f"_row_from_dict(dict={dict_name or 'unknown'})")
+            return 0
+        return _int(val[0] if isinstance(val, (list, tuple)) else val,
+                    f"_row_from_dict key='{key}'")
+    except Exception:
+        return 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  SAFE ROW-BLOCK BUILDER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _build_row_block(
+    base_row: int,
+    col_write: int,
+    has_df: bool,
+    col_source: int,
+    fp_fn,
+    zero_sentinel: str,
+    start_excel_row: int,
+    count: int,
+    block_name: str = "",
+) -> list:
+    base_row   = _int(base_row)
+    col_write  = _int(col_write)
+    col_source = _int(col_source)
+
+    can_build = has_df and col_source > 0 and base_row > 0
+
+    if not can_build:
+        reasons = []
+        if not has_df:       reasons.append("DataFrame absent (has_df=False)")
+        if col_source <= 0:  reasons.append(f"col_source={col_source} (month column not found)")
+        if base_row <= 0:    reasons.append(f"base_row={base_row} (section not found in sheet)")
+        z_audit.record("ROW_ZERO" if (not has_df or base_row <= 0) else "COL_ZERO",
+                       f"Block '{block_name or 'unnamed'}' rows {start_excel_row}-"
+                       f"{start_excel_row+count-1} set to Z: {'; '.join(reasons)}",
+                       f"_build_row_block(start={start_excel_row}, count={count})")
+
+    result = []
+    for i in range(count):
+        excel_row = start_excel_row + i
+        formula = fp_fn(_int(base_row) + i) if can_build else zero_sentinel
+        result.append((excel_row, col_write, formula))
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PUBLIC ENTRY-POINT
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def calculate_alternate_value_1(
+    file_path_P_L: str,
+    df_P_L_ROP_NE:  pd.DataFrame,
+    df_P_L_HQ:      pd.DataFrame,
+    file_path_OSP:  str,
+    df_OSP:         pd.DataFrame,
+    file_path_HMF:  str,
+    df_HMF_Managerial: pd.DataFrame,
+    file_path_New_KPI: str,
+    df_P_L_New_KPI: pd.DataFrame,
+    file_HQ_Item:   str,
+    df_hQ_items:    pd.DataFrame,
+    file_goodwill:  str,
+    df_r_and_d:     pd.DataFrame,
+    df_MZ_conso:    pd.DataFrame,
+    df_P_L_Relief:  pd.DataFrame,
+    df_P_L_PL:      pd.DataFrame,
+    df_P_L_Reclass: pd.DataFrame,
+    df_P_L_MCCP:    pd.DataFrame,
+    df_P_L_OCS:     pd.DataFrame,
+    df_New_KPI_CFMI:  pd.DataFrame,
+    df_New_goodwill:  pd.DataFrame,
+    df_Act:           pd.DataFrame,
+    file_paths_OSP_TGK:    str,
+    df_1c_osp:             pd.DataFrame,
+    file_paths_High_Level_Variance: str,
+    df_high_variance_feuil:         pd.DataFrame,
+    file_paths_Relief_KD:  str,
+    df_Relief_KD:          pd.DataFrame,
+    file_paths_Purchase_Price: str,
+    df_Purchase_Price:         pd.DataFrame,
+    file_paths_UP_Calc:    str,
+    df_UP_Calc:            pd.DataFrame,
+    file_paths_NANO_HFM:   str,
+    df_nano_hfm:           pd.DataFrame,
+    file_paths_ITP:        str,
+    df_itp:                pd.DataFrame,
+    file_path_Template:      str,
+    file_path_Template_1:    str,
+    month_number:            int,
+    Var_Converter:           float,
+    var_Cfmi:                float,
+    ePWR_var:                float,
+    connectivity_var:        float,
+    cafe_penalty_var:        float,
+    file_path_Template_man_1: str,
+    file_path_Template_man:   str,
+    file_path_goodwill_template: str,
+    output_path:             str,
+    var_converter_bJPY:      str,
+    var_converter_mEUR:      str,
+    selected_month,var_new_param_1, var_new_param_2
+) -> None:
+
+    global z_audit
+    z_audit = ZAudit()
+
+    t0 = time.time()
+    logger.info("calculate_alternate_value_1 started")
+
+    # ── Normalise inputs ──────────────────────────────────────────────────────
+    def _p(v): return v if isinstance(v, str) else ""
+    def _d(v): return v if isinstance(v, pd.DataFrame) else pd.DataFrame()
+
+    file_path_P_L               = _p(file_path_P_L)
+    file_path_OSP               = _p(file_path_OSP)
+    file_path_HMF               = _p(file_path_HMF)
+    file_path_New_KPI           = _p(file_path_New_KPI)
+    file_HQ_Item                = _p(file_HQ_Item)
+    file_goodwill               = _p(file_goodwill)
+    file_paths_OSP_TGK          = _p(file_paths_OSP_TGK)
+    file_paths_High_Level_Variance = _p(file_paths_High_Level_Variance)
+    file_paths_Relief_KD        = _p(file_paths_Relief_KD)
+    file_paths_Purchase_Price   = _p(file_paths_Purchase_Price)
+    file_paths_UP_Calc          = _p(file_paths_UP_Calc)
+    file_paths_NANO_HFM         = _p(file_paths_NANO_HFM)
+    file_paths_ITP              = _p(file_paths_ITP)
+    file_path_Template          = _p(file_path_Template)
+    file_path_Template_1        = _p(file_path_Template_1)
+    file_path_Template_man      = _p(file_path_Template_man)
+    file_path_Template_man_1    = _p(file_path_Template_man_1)
+    file_path_goodwill_template = _p(file_path_goodwill_template)
+
+    df_P_L_ROP_NE           = _d(df_P_L_ROP_NE)
+    df_P_L_HQ               = _d(df_P_L_HQ)
+    df_OSP                  = _d(df_OSP)
+    df_HMF_Managerial       = _d(df_HMF_Managerial)
+    df_P_L_New_KPI          = _d(df_P_L_New_KPI)
+    df_hQ_items             = _d(df_hQ_items)
+    df_r_and_d              = _d(df_r_and_d)
+    df_MZ_conso             = _d(df_MZ_conso)
+    df_P_L_Relief           = _d(df_P_L_Relief)
+    df_P_L_PL               = _d(df_P_L_PL)
+    df_P_L_Reclass          = _d(df_P_L_Reclass)
+    df_P_L_MCCP             = _d(df_P_L_MCCP)
+    df_P_L_OCS              = _d(df_P_L_OCS)
+    df_New_KPI_CFMI         = _d(df_New_KPI_CFMI)
+    df_New_goodwill         = _d(df_New_goodwill)
+    df_Act                  = _d(df_Act)
+    df_1c_osp               = _d(df_1c_osp)
+    df_high_variance_feuil  = _d(df_high_variance_feuil)
+    df_Relief_KD            = _d(df_Relief_KD)
+    df_Purchase_Price       = _d(df_Purchase_Price)
+    df_UP_Calc              = _d(df_UP_Calc)
+    df_nano_hfm             = _d(df_nano_hfm)
+    df_itp                  = _d(df_itp)
+
+    month_number = _int(month_number)
+    adj          = (month_number - 4) % 12
+    print("adj",adj)
+
+    # ── Presence flags ────────────────────────────────────────────────────────
+    HAS_ROP_NE    = _df_ok(df_P_L_ROP_NE,           "df_P_L_ROP_NE")
+    HAS_HQ        = _df_ok(df_P_L_HQ,               "df_P_L_HQ")
+    HAS_OSP       = _df_ok(df_OSP,                  "df_OSP")
+    HAS_NEW_KPI   = _df_ok(df_P_L_New_KPI,          "df_P_L_New_KPI")
+    HAS_HQ_ITEMS  = _df_ok(df_hQ_items,             "df_hQ_items")
+    HAS_R_AND_D   = _df_ok(df_r_and_d,              "df_r_and_d")
+    HAS_MZ        = _df_ok(df_MZ_conso,             "df_MZ_conso")
+    HAS_RELIEF    = _df_ok(df_P_L_Relief,           "df_P_L_Relief")
+    HAS_PL_PL     = _df_ok(df_P_L_PL,              "df_P_L_PL")
+    HAS_RECLASS   = _df_ok(df_P_L_Reclass,         "df_P_L_Reclass")
+    HAS_MCCP      = _df_ok(df_P_L_MCCP,            "df_P_L_MCCP")
+    HAS_OCS       = _df_ok(df_P_L_OCS,             "df_P_L_OCS")
+    HAS_FEUIL     = _df_ok(df_high_variance_feuil,  "df_high_variance_feuil")
+    HAS_RELIEF_KD = _df_ok(df_Relief_KD,            "df_Relief_KD")
+    HAS_ITP       = _df_ok(df_itp,                  "df_itp")
+    HAS_NANO      = _df_ok(df_nano_hfm,             "df_nano_hfm")
+
+    HAS_FILE_HQ_ITEM = _file_ok(file_HQ_Item,                    "HQ Item file")
+    HAS_FILE_OSP     = _file_ok(file_path_OSP,                   "OSP file")
+    HAS_FILE_PL      = _file_ok(file_path_P_L,                   "P&L file")
+    HAS_FILE_TGK     = _file_ok(file_paths_OSP_TGK,              "OSP TGK file")
+    HAS_FILE_HLV     = _file_ok(file_paths_High_Level_Variance,  "High_Level_Variance file")
+    HAS_FILE_KD      = _file_ok(file_paths_Relief_KD,            "Relief KD file")
+    HAS_FILE_PP      = _file_ok(file_paths_Purchase_Price,       "Purchase Price file")
+    HAS_FILE_UP      = _file_ok(file_paths_UP_Calc,              "UP Calc file")
+    HAS_FILE_NANO    = _file_ok(file_paths_NANO_HFM,             "NANO HFM file")
+    HAS_FILE_ITP     = _file_ok(file_paths_ITP,                  "ITP file")
+    HAS_TMPL_MAN     = _file_ok(file_path_Template_man,          "Template_man file")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  STEP 1  –  COLUMN INDICES
+    # ══════════════════════════════════════════════════════════════════════════
+    logger.info("Step 1: resolving column indices")
+
+    # col_ROP_NE   = _safe_col_short(df_P_L_ROP_NE,  month_number, "df_P_L_ROP_NE")  if HAS_ROP_NE  else 0
+    # col_PL_PL    = _safe_col_short(df_P_L_PL,       month_number, "df_P_L_PL")      if HAS_PL_PL   else 0
+    # col_New_KPI  = _safe_col_short(df_P_L_New_KPI,  month_number, "df_P_L_New_KPI") if HAS_NEW_KPI else 0
+    # col_MZ_conso = _safe_col_short(df_MZ_conso,     month_number, "df_MZ_conso")    if HAS_MZ      else 0
+    # col_Reclass  = _safe_col_short(df_P_L_Reclass,  month_number, "df_P_L_Reclass") if HAS_RECLASS else 0
+    col_ROP_NE=_int(5 + adj)
+    col_PL_PL=_int(7 + adj)
+    col_New_KPI=_int(5 + adj)
+    col_MZ_conso=_int(4 + adj)
+    col_Reclass=_int(2 + adj)
+
+
+
+    col_Relief   = _int(4 + adj)
+
+    # col_r_and_d  = _safe_col_long(df_r_and_d,   month_number, "df_r_and_d")   if HAS_R_AND_D  else 0
+    # col_hq       = _safe_col_long(df_hQ_items,  month_number, "df_hQ_items")  if HAS_HQ_ITEMS else 0
+    # col_hq_tgt   = _safe_col_long(df_P_L_HQ,    month_number, "df_P_L_HQ")   if HAS_HQ       else 0
+    # col_mccp     = _safe_col_long(df_P_L_MCCP,  month_number, "df_P_L_MCCP") if HAS_MCCP     else 0
+    # col_ocp      = _safe_col_long(df_P_L_OCS,   month_number, "df_P_L_OCS")  if HAS_OCS      else 0
+    col_r_and_d= _int(3 + adj)
+    col_hq= _int(3 + adj)
+    col_hq_tgt= _int(3 + adj)
+    col_mccp= _int(10 + adj)
+    col_ocp= _int(4 + adj)
+
+    col_osp_tgk   = _int(1 + adj)
+    col_PL_write  = _int(col_PL_PL)
+    col_KPI_write = _int(col_New_KPI + 1)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  STEP 2  –  ROW INDICES
+    # ══════════════════════════════════════════════════════════════════════════
+    logger.info("Step 2: resolving row indices")
+
+    # ── R&D (ROP NE) ──────────────────────────────────────────────────────────
+    rd_rows = _safe_rd_terms(df_P_L_ROP_NE, "df_P_L_ROP_NE") if HAS_ROP_NE else {}
+    row_func_rd    = _row_from_dict(rd_rows, "functional r&d",     "rd_rows(ROP_NE)")
+    row_nonfunc_rd = _row_from_dict(rd_rows, "non functional r&d", "rd_rows(ROP_NE)")
+
+    # ── R&D File ──────────────────────────────────────────────────────────────
+    rd_file = _safe_rd_file(df_r_and_d, "df_r_and_d") if HAS_R_AND_D else {}
+    # def _rdf(k): return _row_from_dict(rd_file, k, "rd_file_map")
+    # row_func_rd_rev  = _rdf("functional r&d revenue")
+    # row_func_rd_cost = _rdf("functional r&d cost")
+    # row_nf_rd_rev    = _rdf("non functional r&d revenue")
+    # row_nf_rd_cost   = _rdf("non functional r&d cost")
+       
+    row_func_rd_rev  = 55
+    row_func_rd_cost = 56
+    row_nf_rd_rev    = 59
+    row_nf_rd_cost   = 60
+
+    # ── FMI ───────────────────────────────────────────────────────────────────
+    (fmi_nis_nv, trn_nis_nv, cos_nis_nv, vme_nis_nv,
+     fmi_dat_nv, trn_dat_nv, cos_dat_nv, vme_dat_nv,
+     fmi_inf_nv, trn_inf_nv, cos_inf_nv, vme_inf_nv,
+     fmi_tot_nv, trn_tot_nv, cos_tot_nv, vme_tot_nv,
+     ) = (97, 22, 3, 4, 5, 6, 7, 8, 9, 10, 2, 3, 2, 1, 2, 3) if HAS_ROP_NE else (0,)*16
+
+    (fmi_nis_uc, trn_nis_uc, cos_nis_uc, vme_nis_uc,
+     fmi_dat_uc, trn_dat_uc, cos_dat_uc, vme_dat_uc,
+     fmi_tot_uc, trn_tot_uc, cos_tot_uc, vme_tot_uc,
+     ) = _safe_find_fmi_uc(df_P_L_ROP_NE, "df_P_L_ROP_NE") if HAS_ROP_NE else (0,)*12
+
+    (fmi_nis_as, trn_nis_as, cos_nis_as, vme_nis_as,
+     fmi_dat_as, trn_dat_as, cos_dat_as, vme_dat_as,
+     fmi_inf_as, trn_inf_as, cos_inf_as, vme_inf_as,
+     fmi_tot_as, trn_tot_as, cos_tot_as, vme_tot_as,
+     ) = _safe_find_fmi_as(df_P_L_ROP_NE, "df_P_L_ROP_NE") if HAS_ROP_NE else (0,)*16
+
+    (fmi_nis_ex, trn_nis_ex, cos_nis_ex, vme_nis_ex,
+     fmi_dat_ex, trn_dat_ex, cos_dat_ex, vme_dat_ex,
+     fmi_inf_ex, trn_inf_ex, cos_inf_ex, vme_inf_ex,
+     fmi_tot_ex, trn_tot_ex, cos_tot_ex, vme_tot_ex,
+     ) = _safe_find_fmi_export(df_P_L_ROP_NE, "df_P_L_ROP_NE") if HAS_ROP_NE else (0,)*16
+
+    # ── HQ items ──────────────────────────────────────────────────────────────
+    tp_list = [10] if HAS_HQ_ITEMS else [0]
+    tp_base = 9   if HAS_HQ_ITEMS else 0
+
+    # tax_list = _safe_tax(df_P_L_HQ, "df_P_L_HQ") if HAS_HQ else [0]
+    # op_list  = _safe_op (df_P_L_HQ, "df_P_L_HQ") if HAS_HQ else [0]
+    tax_list =[49]
+    op_list  = [45]
+    
+
+    tax_base = _int(tax_list[0]) if tax_list else 0
+    op_base  = _int(op_list[0])  if op_list  else 0
+
+    # ── Reclass ───────────────────────────────────────────────────────────────
+    reclass_row = _int(_safe_reclass(df_P_L_Reclass, "df_P_L_Reclass")) if HAS_RECLASS else 0
+
+    # ── Relief rows ───────────────────────────────────────────────────────────
+    rel = _safe_relief(df_P_L_Relief, "df_P_L_Relief") if HAS_RELIEF else {}
+    # def _rel(k): return _row_from_dict(rel, k, "relief_map")
+
+    # row_rel_recall    = _rel("recall service/campaigns")
+    # row_rel_kd_nmuk   = _rel("kd itp (nmuk)")
+    # row_rel_kd_nmisa  = _rel("kd itp (nmisa)")
+    # row_rel_kd_nmgr   = _rel("kd itp (nmgr)")
+    # row_rel_conn      = _rel("connectivity")
+    # row_rel_itp_nis   = _rel("itp cbu nissan")
+    # row_rel_itp_inf   = _rel("itp cbu infiniti")
+    # row_rel_iln_nmuk  = _rel("iln export (nmuk)")
+    # row_rel_iln_nmisa = _rel("iln export (nmisa)")
+    # row_rel_err_mz    = _rel("error correction in mz (?)")
+    # row_rel_mz_imp    = _rel("mz impairment")
+    # row_rel_ga_imp    = _rel("g&a impairment")
+    # row_rel_cev       = _rel("compact ev/vt impairment")
+    # row_rel_bat_nmuk  = _rel("battery 40 kw itp ( nmuk )")
+    # row_rel_bat_nmisa = _rel("battery 40 kw itp ( nmisa )")
+    # row_rel_bat_cancel= _rel("battery cancelation")
+    # row_rel_err_wd5   = _rel("error correction in mz (after wd5)")
+    # row_rel_top_daim  = _rel("top daimler correction (after wd5)")
+    # row_rel_inf_fmi   = _rel("infiniti fmi correction (after wd5)")
+
+    # ── OSP outside profit ────────────────────────────────────────────────────
+    row_osp1, col_osp1 = (
+        _safe_outside_profit(df_OSP, month_number, "df_OSP")
+        if HAS_OSP else (0, 0)
+    )
+    row_osp2, col_osp2 = (
+        _safe_outside_profit_2(df_OSP, month_number, "df_OSP")
+        if HAS_OSP else (0, 0)
+    )
+
+    # ── Feuil1 ────────────────────────────────────────────────────────────────
+    row_feuil, col_feuil_base = (
+        _safe_feuil(df_high_variance_feuil, month_number, "df_high_variance_feuil")
+        if HAS_FEUIL else (0, 0)
+    )
+    col_feuil = _int(col_feuil_base + 1 + adj) if col_feuil_base else 0
+
+    # ── Relief KD ─────────────────────────────────────────────────────────────
+    kd_cols = (
+        _safe_relief_kd_cols(df_Relief_KD, month_number, "df_Relief_KD")
+        if HAS_RELIEF_KD else [0, 0]
+    )
+
+    # ── ITP ───────────────────────────────────────────────────────────────────
+    itp_rows = _safe_itp_rows(df_itp, "df_itp")               if HAS_ITP else [0]
+    itp_cols = _safe_itp_cols(df_itp, month_number, "df_itp") if HAS_ITP else [0, 0]
+
+    # ── NANO HFM ──────────────────────────────────────────────────────────────
+    row_nano, col_nano = (
+        _safe_nano(df_nano_hfm, month_number, "df_nano_hfm")
+        if HAS_NANO else (0, 0)
+    )
+
+    # ── Energy ────────────────────────────────────────────────────────────────
+    # energy_list = _safe_energy(df_hQ_items, "df_hQ_items") if HAS_HQ_ITEMS else [0]
+    energy_list = [66]
+    energy_row  = _int(energy_list[0]) if energy_list else 0
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  STEP 3  –  FORMULA STRINGS
+    # ══════════════════════════════════════════════════════════════════════════
+    logger.info("Step 3: building formula strings")
+
+    SH = "ROP NE (Tagetik)"
+
+    def fp(row: int) -> str:
+        if not HAS_ROP_NE:
+            z_audit.record("DF_MISSING", "HAS_ROP_NE is False", f"fp(row={row})")
+            return Z
+        if not col_ROP_NE:
+            z_audit.record("COL_ZERO",
+                           f"col_ROP_NE=0 (month {month_number} not found in ROP_NE)",
+                           f"fp(row={row})")
+            return Z
+        return _safe_gen_formula(_int(row), col_ROP_NE, SH,
+                                 context=f"fp(row={row})")
+
+    def frd(row: int) -> str:
+        if not HAS_R_AND_D:
+            z_audit.record("DF_MISSING", "HAS_R_AND_D is False", f"frd(row={row})")
+            return Z
+        if not col_r_and_d:
+            z_audit.record("COL_ZERO",
+                           f"col_r_and_d=0 (month {month_number} not found in r_and_d)",
+                           f"frd(row={row})")
+            return Z
+        return _safe_gen_formula(_int(row), col_r_and_d, "R&D",
+                                 context=f"frd(row={row})")
+
+    def focp(row: int) -> str:
+        if not HAS_OCS:
+            z_audit.record("DF_MISSING", "HAS_OCS is False", f"focp(row={row})")
+            return Z
+        if not col_ocp:
+            z_audit.record("COL_ZERO",
+                           f"col_ocp=0 (month {month_number} not found in OCS)",
+                           f"focp(row={row})")
+            return Z
+        return _safe_gen_formula(_int(row), col_ocp, "OCS details",
+                                 context=f"focp(row={row})")
+
+    def fmccp(row: int) -> str:
+        if not HAS_MCCP:
+            z_audit.record("DF_MISSING", "HAS_MCCP is False", f"fmccp(row={row})")
+            return Z
+        if not col_mccp:
+            z_audit.record("COL_ZERO",
+                           f"col_mccp=0 (month {month_number} not found in MCCP)",
+                           f"fmccp(row={row})")
+            return Z
+        return _safe_gen_formula(_int(row), col_mccp, "MCPP",
+                                 context=f"fmccp(row={row})")
+
+    def frel(row: int) -> str:
+        row = _int(row)
+        if not HAS_RELIEF:
+            z_audit.record("DF_MISSING", "HAS_RELIEF is False", f"frel(row={row})")
+            return Z
+        if not row:
+            z_audit.record("ROW_ZERO", "row=0 in frel() — key not found in relief_map",
+                           f"frel(row={row})")
+            return Z
+        return _safe_gen_formula(row, col_Relief, "Relief",
+                                 context=f"frel(row={row})")
+
+    def freclass(row: int) -> str:
+        row = _int(row)
+        if not HAS_RECLASS:
+            z_audit.record("DF_MISSING", "HAS_RECLASS is False", f"freclass(row={row})")
+            return Z
+        if not row:
+            z_audit.record("ROW_ZERO", "reclass_row=0 — G_and_A_Reliev1 returned nothing",
+                           f"freclass(row={row})")
+            return Z
+        if not col_Reclass:
+            z_audit.record("COL_ZERO",
+                           f"col_Reclass=0 (month {month_number} not found in Reclass sheet)",
+                           f"freclass(row={row})")
+            return Z
+        return _safe_gen_formula(row, col_Reclass, "Reclass",
+                                 context=f"freclass(row={row})")
+
+    def fhq_tgt(row: int) -> str:
+        row = _int(row)
+        if not HAS_HQ:
+            z_audit.record("DF_MISSING", "HAS_HQ is False", f"fhq_tgt(row={row})")
+            return Z
+        if not col_hq_tgt:
+            z_audit.record("COL_ZERO",
+                           f"col_hq_tgt=0 (month {month_number} not in HQ Tagetik)",
+                           f"fhq_tgt(row={row})")
+            return Z
+        if not row:
+            z_audit.record("ROW_ZERO", "row=0 in fhq_tgt()", f"fhq_tgt(row={row})")
+            return Z
+        return _safe_gen_formula(row, col_hq_tgt, "HQ Tagetik",
+                                 context=f"fhq_tgt(row={row})")
+
+    def fhq_item(offset: int) -> str:
+        offset = _int(offset)
+        row    = _int(tp_base) + offset
+        if not HAS_HQ_ITEMS:
+            z_audit.record("DF_MISSING", "HAS_HQ_ITEMS is False",
+                           f"fhq_item(offset={offset})")
+            return Z
+        if not col_hq:
+            z_audit.record("COL_ZERO",
+                           f"col_hq=0 (month {month_number} not found in HQ_items sheet)",
+                           f"fhq_item(offset={offset})")
+            return Z
+        if not tp_base:
+            z_audit.record("ROW_ZERO",
+                           "tp_base=0 — find_transfer_price_adjustment returned 0 or empty",
+                           f"fhq_item(offset={offset})")
+            return Z
+        if not HAS_FILE_HQ_ITEM:
+            z_audit.record("FILE_MISSING",
+                           f"HQ Item file missing: {file_HQ_Item}",
+                           f"fhq_item(offset={offset})")
+            return Z
+        if not row:
+            z_audit.record("ROW_ZERO",
+                           f"Computed row=0 (tp_base={tp_base} + offset={offset})",
+                           f"fhq_item(offset={offset})")
+            return Z
+        return _safe_gen_formula(row, col_hq, "2026 MTD", file_HQ_Item,
+                                 context=f"fhq_item(offset={offset})")
+
+    # ── HQ items formula block ────────────────────────────────────────────────
+    formula_hq_list = [fhq_item(o) for o in [5, 3, 6, 10, 18, 21, 22, 26, 4, 34, 1, 20]]
+    valid_hq = [x[1:] for x in formula_hq_list if x != Z]
+    formula_hq_sum = f"=({' + '.join(valid_hq)}) / 1000000" if valid_hq else Z
+    if not valid_hq:
+        z_audit.record("COMPOUND_Z",
+                       "formula_hq_sum → Z because all 12 fhq_item() calls returned Z",
+                       "formula_hq_sum assembly")
+
+    # ── HQ Tagetik tax / operating profit ─────────────────────────────────────
+    def ftax(offset):
+        if not tax_base:
+            z_audit.record("ROW_ZERO",
+                           f"tax_base=0 — tax_and_public returned 0 (offset={offset})",
+                           "ftax()")
+            return Z
+        return fhq_tgt(_int(tax_base) + _int(offset))
+
+    def fop(offset):
+        if not op_base:
+            z_audit.record("ROW_ZERO",
+                           f"op_base=0 — operating_profit returned 0 (offset={offset})",
+                           "fop()")
+            return Z
+        return fhq_tgt(_int(op_base) + _int(offset))
+
+    tax_parts = [x[1:] for x in [
+        ftax(3), ftax(1), ftax(20), ftax(4), ftax(22), ftax(6),
+        ftax(7), ftax(16), ftax(18),
+        fop(0), fop(1), fop(2), fop(3),
+    ] if x != Z]
+    formula_hq_tax_sum = f"=({' + '.join(tax_parts)}) / 1000000" if tax_parts else Z
+    if not tax_parts:
+        z_audit.record("COMPOUND_Z",
+                       "formula_hq_tax_sum → Z because all tax/op formula calls returned Z",
+                       "formula_hq_tax_sum assembly")
+
+    # ── Template extract helper ───────────────────────────────────────────────
+    def _ex(sheet, row, col, label=""):
+        row, col = _int(row), _int(col)
+        if not HAS_TMPL_MAN:
+            z_audit.record("FILE_MISSING",
+                           f"Template_man file missing: {file_path_Template_man}",
+                           label or f"_ex(sheet={sheet}, row={row}, col={col})")
+            return Z
+        return _safe_extract_formula(file_path_Template_man, sheet, row, col, label)
+
+    SH_TGT = "HQ Tagetik"
+    SH_REL = "New KPI Actual"
+
+    hq_ex_1 = _ex(SH_TGT, 46, col_hq_tgt, "hq_ex_1")
+    hq_ex_2 = _ex(SH_TGT, 47, col_hq_tgt, "hq_ex_2")
+    hq_ex_3 = _ex(SH_TGT, 48, col_hq_tgt, "hq_ex_3")
+    hq_ex_4 = _ex(SH_TGT, 49, col_hq_tgt, "hq_ex_4")
+
+    # ── NANO / UP calc ────────────────────────────────────────────────────────
+    _nano_raw = (
+        _safe_gen_formula(row_nano, col_nano, "Actual", file_paths_NANO_HFM,
+                          context="NANO formula")
+        if (HAS_NANO and HAS_FILE_NANO and row_nano and col_nano) else Z
+    )
+    if _nano_raw == Z and not (HAS_NANO and HAS_FILE_NANO and row_nano and col_nano):
+        missing = []
+        if not HAS_NANO:      missing.append("df_nano_hfm absent")
+        if not HAS_FILE_NANO: missing.append(f"NANO HFM file missing: {file_paths_NANO_HFM}")
+        if not row_nano:      missing.append("row_nano=0")
+        if not col_nano:      missing.append("col_nano=0")
+        z_audit.record("DF_MISSING" if not HAS_NANO else
+                       "FILE_MISSING" if not HAS_FILE_NANO else "ROW_ZERO",
+                       "; ".join(missing), "NANO formula pre-check")
+    f_nano = f"={_nano_raw[1:]}*10^3" if _nano_raw != Z else Z
+
+    _up_raw = (_safe_gen_formula(18, 25, "UP_Calculation", file_paths_UP_Calc,
+                                 context="UP_Calc formula")
+               if HAS_FILE_UP else Z)
+    if not HAS_FILE_UP:
+        z_audit.record("FILE_MISSING",
+                       f"UP Calc file missing: {file_paths_UP_Calc}",
+                       "UP_Calc formula pre-check")
+    f_up = f"={_up_raw[1:]}*10^6" if _up_raw != Z else Z
+
+    _energy_offset = energy_row - tp_base
+    if not (energy_row and tp_base):
+        if not energy_row:
+            z_audit.record("ROW_ZERO", "energy_row=0 — energy_tgk_68 returned 0", "f_energy")
+        if not tp_base:
+            z_audit.record("ROW_ZERO", "tp_base=0 — transfer price base row is 0", "f_energy")
+    f_energy = fhq_item(_energy_offset) if (energy_row and tp_base) else Z
+
+    # ── OSP formulas ──────────────────────────────────────────────────────────
+    # _osp1_row = _int(row_osp1) - 5 if (_int(row_osp1) > 5) else 0
+    # _osp2_row = _int(row_osp2) - 5 if (_int(row_osp2) > 5) else 0
+    _osp1_row = 1
+    _osp2_row = 1 
+
+
+    # if _osp1_row < 0:
+    #     z_audit.record("ROW_ZERO",
+    #                    f"OSP row_osp1={row_osp1} <= 5, computed _osp1_row=0",
+    #                    "f_osp1_raw")
+    f_osp1_raw = (
+        _safe_gen_formula_1(_osp1_row, _int(col_osp1), "Master",
+                          context="f_osp1_raw")
+        if (HAS_OSP and _osp1_row and col_osp1) else Z
+    )
+    # if _osp2_row<0:
+    #     z_audit.record("ROW_ZERO",
+    #                    f"OSP row_osp2={row_osp2} <= 5, computed _osp2_row=0",
+    #                    "f_osp2_raw")
+    f_osp2_raw = (
+        _safe_gen_formula_1(_osp2_row, _int(col_osp2), "Master",
+                          context="f_osp2_raw")
+        if (HAS_OSP and _osp2_row and col_osp2) else Z
+    )
+    f_osp2 = f"=-{f_osp2_raw[1:]}" if f_osp2_raw != Z else Z
+
+    f_ex_249  = _ex(SH_REL, 249, _int(col_KPI_write), "f_ex_249")
+    f_249     = _safe_gen_formula_249(month_number, file_path_OSP) if HAS_FILE_OSP else Z
+    if not HAS_FILE_OSP:
+        z_audit.record("FILE_MISSING", f"OSP file missing for f_249: {file_path_OSP}", "f_249")
+    f_sum249  = _compound(f_249, "-", f_ex_249, context="f_sum249")
+
+    f_osp_ex1 = _ex(SH_REL, 239, _int(col_KPI_write)-1 , "f_osp_ex1")
+    f_osp_sum = _compound(f_osp1_raw, "-", f_osp_ex1, context="f_osp_sum")
+
+    # ── OCP ─────────────────────────────f_osp_ex1──────────────────────────────────────
+    f_ocp1    = focp(74)
+    f_ocp2    = focp(81)
+    f_ocp_ex1 = _ex(SH_REL, 482, _int(col_KPI_write)-1 , "ocp_ex1")
+    f_ocp_ex2 = _ex(SH_REL, 500, _int(col_KPI_write) , "ocp_ex2")
+
+    _ocp_ab = " + ".join(x[1:] for x in [f_ocp1, f_ocp2] if x != Z)
+    f_sum_ocp1 = (f"={f_ocp_ex1[1:]}-({_ocp_ab})/10^6" if (f_ocp_ex1 != Z and _ocp_ab)
+                  else f_ocp_ex1 if f_ocp_ex1 != Z else Z)
+    f_sum_ocp2 = (f"={f_ocp_ex2[1:]}+({_ocp_ab})/10^6" if (f_ocp_ex2 != Z and _ocp_ab)
+                  else f_ocp_ex2 if f_ocp_ex2 != Z else Z)
+
+    # ── OSP TGK ───────────────────────────────────────────────────────────────
+    def _tgk(abs_row: int) -> str:
+        r = _int(abs_row) - 2
+        if not (HAS_FILE_TGK and r > 0 and col_osp_tgk):
+            reasons = []
+            if not HAS_FILE_TGK:  reasons.append(f"OSP TGK file missing: {file_paths_OSP_TGK}")
+            if r <= 0:            reasons.append(f"computed row={r} <= 0 (abs_row={abs_row})")
+            if not col_osp_tgk:   reasons.append(f"col_osp_tgk=0")
+            z_audit.record("FILE_MISSING" if not HAS_FILE_TGK else "ROW_ZERO",
+                           "; ".join(reasons), f"_tgk(abs_row={abs_row})")
+            return Z
+        return _safe_gen_formula(r, col_osp_tgk, "Summary", file_paths_OSP_TGK,
+                                 context=f"_tgk(abs_row={abs_row})")
+
+    f_tgk1 = _tgk(6);  f_tgk2 = _tgk(13)
+    f_tgk3 = _tgk(20); f_tgk4 = _tgk(27)
+
+    # ── High Level Variance / Feuil1 ─────────────────────────────────────────
+    if not (HAS_FEUIL and HAS_FILE_HLV and row_feuil and col_feuil):
+        reasons = []
+        if not HAS_FEUIL:    reasons.append("df_high_variance_feuil absent")
+        if not HAS_FILE_HLV: reasons.append(f"High_Level_Variance file missing: {file_paths_High_Level_Variance}")
+        if not row_feuil:    reasons.append("row_feuil=0")
+        if not col_feuil:    reasons.append(f"col_feuil=0 (col_feuil_base={col_feuil_base})")
+        z_audit.record("DF_MISSING" if not HAS_FEUIL else "FILE_MISSING",
+                       "; ".join(reasons), "f_relief_1 (Feuil1)")
+    f_relief_1 = (
+        _safe_gen_formula(row_feuil, col_feuil, "Feuil1", file_paths_High_Level_Variance,
+                          context="f_relief_1")
+        if (HAS_FEUIL and HAS_FILE_HLV and row_feuil and col_feuil) else Z
+    )
+
+    # ── Relief KD ─────────────────────────────────────────────────────────────
+    def _kd(abs_row: int, col_idx: int) -> str:
+        col = _int(kd_cols[col_idx]) if len(kd_cols) > col_idx else 0
+        if not (HAS_RELIEF_KD and HAS_FILE_KD and abs_row and col):
+            reasons = []
+            if not HAS_RELIEF_KD: reasons.append("df_Relief_KD absent")
+            if not HAS_FILE_KD:   reasons.append(f"Relief KD file missing: {file_paths_Relief_KD}")
+            if not abs_row:        reasons.append(f"abs_row=0")
+            if not col:            reasons.append(f"kd_cols[{col_idx}]=0")
+            z_audit.record("DF_MISSING" if not HAS_RELIEF_KD else "FILE_MISSING",
+                           "; ".join(reasons),
+                           f"_kd(abs_row={abs_row}, col_idx={col_idx})")
+            return Z
+        return _safe_gen_formula(_int(abs_row), col, "Actuals vs FY25", file_paths_Relief_KD,
+                                 context=f"_kd(abs_row={abs_row})")
+
+    f_relief_2_raw = _kd(45, 0);  f_relief_3_raw = _kd(30, 0)
+    f_relief_4_raw = _kd(15, 0);  f_relief_5_raw = _kd(45, 1)
+    f_relief_6_raw = _kd(30, 1)
+
+    f_ex_rel1 = _ex("Relief", 80, col_Relief, "relief_ex_row80")
+    f_ex_rel5 = _ex("Relief", 87, col_Relief, "relief_ex_row87")
+
+    _MONTH_ABBR = ["Jan","Feb","Mar","Apr","May","Jun",
+                   "Jul","Aug","Sep","Oct","Nov","Dec"]
+    month_abbr = _MONTH_ABBR[selected_month - 1]
+    HFM = f"'HFM_{month_abbr}'!V8"
+
+    if month_number == 4:
+        f_relief_12 = f"={connectivity_var}"
+        z_audit.record("DELIBERATE",
+                       "month_number==4: f_relief_12 set to connectivity_var (no prior month)",
+                       "f_relief_12")
+    else:
+        f_relief_12 = (
+            f"=({connectivity_var})-{f_ex_rel5[1:]}"
+            if f_ex_rel5 != Z else f"={connectivity_var}"
+        )
+        if f_ex_rel5 == Z:
+            z_audit.record("COMPOUND_Z",
+                           "f_ex_rel5 is Z → f_relief_12 falls back to connectivity_var only",
+                           "f_relief_12")
+
+    def _neg_div(raw: str, ex: str = Z, divisor: int = 1000,
+                 context: str = "") -> str:
+        if raw == Z:
+            z_audit.record("COMPOUND_Z", f"raw formula is Z in _neg_div",
+                           context or "_neg_div")
+            return Z
+        base = f"=-({raw[1:]}){f'/{divisor}'}"
+        return f"{base}-{ex[1:]}" if ex != Z else base
+
+    f_relief_2 = _neg_div(f_relief_2_raw, f_ex_rel1, context="f_relief_2")
+    f_relief_3 = _neg_div(f_relief_3_raw,             context="f_relief_3")
+    f_relief_4 = _neg_div(f_relief_4_raw,             context="f_relief_4")
+    f_relief_5 = _neg_div(f_relief_5_raw,             context="f_relief_5")
+    f_relief_6 = _neg_div(f_relief_6_raw,             context="f_relief_6")
+
+    # ── ITP / Purchase Price ──────────────────────────────────────────────────
+    _itp_r = _int(itp_rows[0]) if itp_rows else 0
+    _itp_c = _int(itp_cols[0]) if itp_cols else 0
+    if not (HAS_ITP and HAS_FILE_ITP and _itp_r and _itp_c):
+        reasons = []
+        # if not HAS_ITP:      reasons.append("df_itp absent")
+        if not HAS_FILE_ITP: reasons.append(f"ITP file missing: {file_paths_ITP}")
+        if not _itp_r:       reasons.append("itp_rows[0]=0")
+        if not _itp_c:       reasons.append("itp_cols[0]=0")
+        if reasons:
+            z_audit.record("DF_MISSING" if not HAS_ITP else "FILE_MISSING",
+                           "; ".join(reasons), "f_relief_9")
+    f_relief_9 = (
+        _safe_gen_formula(3, 4, "vs FC2+10(FY25)", file_paths_ITP,
+                          context="f_relief_9")
+        if (HAS_ITP and HAS_FILE_ITP ) else Z
+    )
+
+    if not HAS_FILE_PP:
+        z_audit.record("FILE_MISSING",
+                       f"Purchase Price file missing: {file_paths_Purchase_Price}",
+                       "f_relief_10")
+    _pp_raw = (_safe_gen_formula(14, 10, "Summary pivot", file_paths_Purchase_Price,
+                                 context="Purchase Price")
+               if HAS_FILE_PP else Z)
+    f_relief_10 = f"=-({_pp_raw[1:]})/10^6" if _pp_raw != Z else Z
+
+    # ── UED ───────────────────────────────────────────────────────────────────
+    f_ued_tmpl = _ex("P&L Actual", 340, _int(col_PL_write), "UED_template")
+    f_sum_UED  = (
+        f"=({f_ued_tmpl[1:]})/1000"
+        if (f_ued_tmpl != Z) else Z
+    )
+    if f_ued_tmpl == Z:
+        z_audit.record("COMPOUND_Z", "f_ued_tmpl is Z → f_sum_UED falls to Z", "f_sum_UED")
+
+    # ── MCCP ──────────────────────────────────────────────────────────────────
+    f_mccp1 = fmccp(208)
+    f_mccp2 = fmccp(322)
+
+    # ── KPI Relief formulas ───────────────────────────────────────────────────
+    # f_kpi_1   = frel(row_rel_mz_imp)
+    # f_kpi_2   = frel(row_rel_ga_imp)
+    # f_kpi_3   = freclass(reclass_row)
+    # f_kpi_4   = frel(row_rel_iln_nmuk)
+    # f_kpi_4_1 = frel(_int(row_rel_iln_nmuk) + 1) if row_rel_iln_nmuk else Z
+    # f_kpi_5   = frel(row_rel_itp_inf)
+    # f_kpi_6   = frel(row_rel_err_mz)
+    # f_kpi_7   = frel(row_rel_kd_nmuk)
+    # f_kpi_8   = frel(row_rel_kd_nmgr)
+    # f_kpi_9   = frel(row_rel_kd_nmisa)
+    # f_kpi_10  = frel(row_rel_bat_nmuk)
+    # f_kpi_11  = frel(row_rel_bat_nmisa)
+    # f_kpi_111 = frel(_int(row_rel_ga_imp) + 1) if row_rel_ga_imp else Z
+    # f_kpi_12  = frel(row_rel_cev)
+    # f_kpi_13  = frel(row_rel_itp_nis)
+    # f_kpi_14  = frel(row_rel_bat_cancel)
+    # f_kpi_15  = frel(row_rel_err_wd5)
+    # f_kpi_16  = frel(row_rel_top_daim)
+    # f_kpi_17  = frel(row_rel_inf_fmi)
+
+    # f_kpi_18  = frel(row_rel_recall)
+    # f_kpi_conn= frel(row_rel_conn)
+
+    f_kpi_1   = frel(91)
+    f_kpi_2   = frel(12)
+    f_kpi_3   = frel(13)
+    f_kpi_4   = frel(14)
+    f_kpi_4_1 = frel(15)
+    f_kpi_5   = frel(16)
+    f_kpi_6   = frel(16)
+    f_kpi_7   = frel(17)
+    f_kpi_8   = frel(18)
+    f_kpi_9   = frel(19)
+    f_kpi_10  = frel(20)
+    f_kpi_11  = frel(21)
+    f_kpi_111 = frel(22)
+    f_kpi_12  = frel(24)
+    f_kpi_13  = frel(25)
+    f_kpi_14  = frel(26)
+    f_kpi_15  = frel(27)
+    f_kpi_16  = frel(29)
+    f_kpi_17  = frel(30)
+    f_kpi_18  = frel(31)
+    f_kpi_conn= frel(11)
+
+    f_sum_kpi_1 = _join_sum(f_kpi_2, f_kpi_3,                               context="f_sum_kpi_1")
+    f_sum_kpi_2 = _join_sum(f_kpi_4, f_kpi_4_1,                             context="f_sum_kpi_2")
+    f_sum_kpi_3 = _join_sum(f_kpi_7, f_kpi_8, f_kpi_9, f_kpi_10, f_kpi_11, context="f_sum_kpi_3")
+    f_sum_kpi_4 = _join_sum(f_kpi_conn, f_kpi_13,                           context="f_sum_kpi_4")
+    f_sum_kpi_5 = _join_sum(f_kpi_14, f_kpi_15, f_kpi_16, f_kpi_17,        context="f_sum_kpi_5")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  STEP 4  –  CELL UPDATE TABLES
+    # ══════════════════════════════════════════════════════════════════════════
+    logger.info("Step 4: building cell update tables")
+
+    def _c(col0): return _int(col0) + 1
+
+    # ── Reclass ───────────────────────────────────────────────────────────────
+    col_rel_w = _c(col_Reclass)
+    upd_reclass = (
+        [
+            (reclass_row - 2, col_rel_w, Var_Converter),
+            (reclass_row + 1, col_rel_w, var_converter_bJPY),
+            (reclass_row + 2, col_rel_w, var_converter_mEUR),
+        ]
+        if (HAS_RECLASS and reclass_row) else []
+    )
+
+    # ── Relief ────────────────────────────────────────────────────────────────
+    col_rel_wr = _c(col_Relief)
+    upd_relief = [
+        (78,  col_rel_wr, ePWR_var),
+        (75,  col_rel_wr, f_relief_1),
+        (80,  col_rel_wr, f_relief_2),
+        (81,  col_rel_wr, f_relief_3),
+        (82,  col_rel_wr, f_relief_4),
+        (83,  col_rel_wr, f_relief_5),
+        (84,  col_rel_wr, f_relief_6),
+        (87,  col_rel_wr, f_relief_12),
+        (95,  col_rel_wr, f_relief_9),
+        (96,  col_rel_wr, var_new_param_1),
+        (97,  col_rel_wr, var_new_param_2),
+    ]
+
+    # ── HQ Tagetik ────────────────────────────────────────────────────────────
+    col_hq_w = _c(col_hq_tgt)
+    _hq_block_ok = bool(col_hq_tgt and HAS_HQ_ITEMS and col_hq and
+                        tp_base and HAS_FILE_HQ_ITEM)
+    if not _hq_block_ok and col_hq_tgt:
+        reasons = []
+        if not HAS_HQ_ITEMS:      reasons.append("df_hQ_items absent")
+        if not col_hq:            reasons.append(f"col_hq=0 (month {month_number} not found)")
+        if not tp_base:           reasons.append("tp_base=0")
+        if not HAS_FILE_HQ_ITEM:  reasons.append(f"HQ Item file missing: {file_HQ_Item}")
+        z_audit.record("DF_MISSING" if not HAS_HQ_ITEMS else "FILE_MISSING",
+                       "HQ block rows 9-44 set to Z: " + "; ".join(reasons),
+                       "upd_hq block assembly")
+
+    upd_hq = (
+        [
+            *[(9 + i, col_hq_w,
+               fhq_item(i - 1) if _hq_block_ok else Z)
+              for i in range(36)],
+            (46, col_hq_w, hq_ex_1), (47, col_hq_w, hq_ex_2),
+            (48, col_hq_w, hq_ex_3), (49, col_hq_w, hq_ex_4),
+            (52, col_hq_w, f_nano),
+            (54, col_hq_w, f_up),
+            (67, col_hq_w, f_energy),
+            (69, col_hq_w, cafe_penalty_var),
+        ]
+        if col_hq_tgt else []
+    )
+
+    # ── P&L Actual ────────────────────────────────────────────────────────────
+    col_pl = _c(col_PL_write)
+    upd_pl = [
+        # (304, col_pl, fp(row_func_rd)),    (305, col_pl, fp(row_nonfunc_rd)),
+        (307, col_pl, frd(row_func_rd_rev)),  (308, col_pl, frd(row_func_rd_cost)),
+        (309, col_pl, frd(row_nf_rd_rev)),    (310, col_pl, frd(row_nf_rd_cost)),
+        (338, col_pl, formula_hq_sum),
+        (339, col_pl, formula_hq_tax_sum),
+        (340, col_pl, f_sum_UED),
+    ]
+
+    # ── New KPI Actual ────────────────────────────────────────────────────────
+    col_kpi = _c(col_KPI_write-1)
+    upd_kpi = [
+        # (42,  col_kpi, f_kpi_1),
+        # (45,  col_kpi, f_sum_kpi_1),
+        (205, col_kpi, f_mccp1),
+        (239, col_kpi, f_osp_sum),
+        (249, col_kpi, f_sum249),
+        (263, col_kpi, f_osp2),
+        (319, col_kpi, f_mccp2),
+        # (382, col_kpi, f_sum_kpi_2),
+        # (383, col_kpi, f_kpi_6),
+        # (384, col_kpi, f_sum_kpi_3),
+        # (387, col_kpi, f_kpi_111),
+        # (390, col_kpi, f_kpi_12),
+        # (391, col_kpi, f_sum_kpi_4),
+        # (394, col_kpi, f_sum_kpi_5),
+        # (402, col_kpi, f_kpi_5),
+        # (421, col_kpi, f_kpi_18),
+        # (482, col_kpi, f_sum_ocp1),
+        # (500, col_kpi, f_sum_ocp2),
+        (532, col_kpi, f_tgk1),
+        (533, col_kpi, f_tgk2),
+        (534, col_kpi, f_tgk3),
+    ]
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  STEP 5  –  WRITE OUTPUT FILE
+    # ══════════════════════════════════════════════════════════════════════════
+    logger.info("Step 5: writing output file")
+
+    sheet_names = ["Reclass", "Relief", "HQ Tagetik", "P&L Actual", "New KPI Actual"]
+    all_updates = [upd_reclass, upd_relief, upd_hq, upd_pl, upd_kpi]
+
+    legacy_path, result_path = paste_values_KPI_PL(
+        file_path_Template, sheet_names, all_updates, month_number, output_path,
+    )
+    logger.info(f"P&L output written → {result_path}  ({time.time()-t0:.1f}s)")
+
+    audit_report_path = z_audit.write_report(output_path)
+    logger.info(f"Z-Audit report → {audit_report_path}")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  STEP 6  –  HAND OFF TO ACT
+    # ══════════════════════════════════════════════════════════════════════════
+    logger.info("Step 6: calling ACT")
+
+    ACT(
+        file_path_P_L, legacy_path,
+        df_P_L_ROP_NE, df_P_L_HQ,
+        file_path_OSP, df_OSP,
+        file_path_HMF, df_HMF_Managerial,
+        file_path_New_KPI, df_P_L_New_KPI,
+        file_HQ_Item, df_hQ_items,
+        file_goodwill,
+        df_r_and_d, df_MZ_conso, df_P_L_Relief,
+        df_P_L_PL, df_P_L_Reclass, df_P_L_MCCP, df_P_L_OCS,
+        df_New_KPI_CFMI, df_New_goodwill, df_Act,
+        df_1c_osp,
+        file_paths_High_Level_Variance, df_high_variance_feuil,
+        file_paths_Relief_KD, df_Relief_KD,
+        file_paths_Purchase_Price, df_Purchase_Price,
+        file_paths_UP_Calc, df_UP_Calc,
+        file_paths_NANO_HFM, df_nano_hfm,
+        file_paths_ITP, df_itp,
+        file_path_Template, file_path_Template_1,
+        month_number, Var_Converter, var_Cfmi,
+        file_path_Template_man_1, file_path_goodwill_template,
+        result_path, output_path,
+    )
+
+

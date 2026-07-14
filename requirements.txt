@@ -1,0 +1,10 @@
+
+openpyxl
+tk
+pandas
+numpy
+pytest-shutil
+msoffcrypto-tool
+logging
+xlsxwriter
+pyinstaller
