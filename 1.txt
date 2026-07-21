@@ -24,3 +24,37 @@ ETD.Format_Data
 ETD.Export_NPOPS
 
 End Sub
+Not via any file transfer, API, or database write — it's done by simulating a human typing on a terminal:
+
+The sub grabs the currently active, already-connected Attachmate terminal session (ExtraSystem.ActiveSession) — someone/something else must have already logged into the mainframe before this runs
+It checks which screen is currently showing by reading fixed text at fixed coordinates (e.g., "is the string at row 3, column 14 equal to M009000G?")
+Based on that, it sends keystrokes to navigate menus: 13<Enter>, then 11<Enter>, then 1<Enter> — literally the same numeric menu options a human would type
+Once on the right update screen, it moves the terminal cursor to exact coordinates (row 5 col 24; row 13 col 29; row 13 col 45) and types the part number, ETD date, and quantity into those exact spots
+Sends <PF8> (a function key) to submit
+Reads back a status message from a fixed screen location to determine success/failure
+Repeats for the next part, using <PF11> to back out to the list
+
+This is a screen-scraping automation, not an integration — it works only because someone built it to match this exact mainframe screen's exact layout, and it would break if that layout ever changed.
+
+Questions to ask the process owner
+
+Group these by what they unlock:
+
+On the mainframe piece (the hard part — ask these first):
+
+Does NPOPS have any API, file-drop, batch-upload, or database write path that bypasses the terminal screen entirely? (This single answer could eliminate the hardest 20% of the whole project.)
+Who currently owns/maintains the Attachmate/EXTRA! terminal software and the mainframe connection itself — IT, a specific vendor, or someone in-house?
+Is there documentation of the NPOPS screen flow (the M009000G → NPS025P1 navigation), or was this reverse-engineered by watching a user work?
+How often does the mainframe screen layout change or get updated — has this automation broken before, and how was it fixed?
+Is there a test/sandbox NPOPS environment, so a Python rebuild of this step can be tested without risking live dealer-facing data?
+
+On the upstream data (fills the gap this file couldn't answer):
+6. Where does the UK/Ams ETD backorder feed actually come from — is it a manual Excel export from another system, an automated nightly extract, or something else?
+7. What system do the linked tables dbo_PARTS_MASTER and dbo_ON_ORDER_FILE actually point to — same SQL Server as the picker-report stored procedures, or something separate?
+8. Is there a SQL Server instance behind any of this that I could get direct, read-only access to, rather than going through Access at all?
+
+On process/ownership:
+9. Who currently runs this — one person clicking the button, or is it scheduled/shared across a team? How often (daily/weekly)?
+10. What happens today when Export_NPOPS fails on a row (marked red) — is there a manual fallback, and who handles it?
+11. Is there a target date/deadline for the Python migration, and does the mainframe piece specifically need to be done, or is it acceptable to keep that one step manual (person types into NPOPS) while Python automates everything upstream of it?
+12. Are there other buttons/macros in this database I haven't seen the internals of yet that also touch NPOPS or other live systems? (worth a full audit before committing to a scope
