@@ -1,0 +1,223 @@
+Option Compare Database
+
+Private Sub Claim_SUv2_AfterUpdate()
+    '"Stock";"Urgent";"Stock And Ugent"
+    If Me.Claim_SUv2.Value = "Stock" Then
+        Me.txtClaim_SU.Value = "S%"
+    ElseIf Me.Claim_SUv2.Value = "VOR" Then
+        Me.txtClaim_SU.Value = "V%"
+    Else
+        Me.txtClaim_SU.Value = "%"
+    End If
+End Sub
+
+
+Private Sub cmdGenReport_Click()
+    Set_Filters
+    'Display Report
+    If IsNull(Me.txtClaim_PickerFullName) And IsNull(Me.Team_ID) Then
+        DoCmd.OpenReport "rptNisC_PickerClaimReport_Sum", acViewPreview
+    Else
+        DoCmd.OpenReport "rptNisC_PickerClaimReport_Sum_ByPicker", acViewPreview
+    End If
+    
+End Sub
+
+Private Sub Set_Filters()
+      
+    Dim cnnSP_SQL As ADODB.Connection
+    Dim cmdSP_SQL As ADODB.Command
+    Dim parmSP_SQL As ADODB.Parameter
+    Dim rsSource As ADODB.Recordset
+    Dim rsData As ADODB.Recordset
+    Dim strUserName As String
+    
+    GetWindowsUserName strUserName
+    Form_frm_PU_FRA_ReportsN.txtUserName.Value = strUserName
+    
+    Set cnnSP_SQL = CurrentProject.Connection
+    Set cmdSP_SQL = New ADODB.Command
+    
+    cmdSP_SQL.ActiveConnection = cnnSP_SQL
+    cmdSP_SQL.CommandType = adCmdStoredProc
+    cmdSP_SQL.CommandText = "qryNisC_PickerClaimFilters"
+    
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtUserName", adVarChar, adParamInput, 50, strUserName)
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    
+    Set rsData = cmdSP_SQL.Execute
+    
+    If rsData.RecordCount > 0 Then
+    
+        Set cmdSP_SQL = Nothing
+        Set cmdSP_SQL = New ADODB.Command
+        
+        cmdSP_SQL.ActiveConnection = cnnSP_SQL
+        cmdSP_SQL.CommandType = adCmdStoredProc
+        cmdSP_SQL.CommandText = "qryNisC_PickerClaimFiltersReset"
+        cmdSP_SQL.CommandTimeout = 1000
+        
+        Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtUserName", adVarChar, adParamInput, 50, strUserName)
+        cmdSP_SQL.Parameters.Append parmSP_SQL
+        
+        cmdSP_SQL.Execute
+        
+    End If
+    
+    'Set Criteria Filter
+    Set cmdSP_SQL = Nothing
+    Set cmdSP_SQL = New ADODB.Command
+    
+    cmdSP_SQL.ActiveConnection = cnnSP_SQL
+    cmdSP_SQL.CommandType = adCmdStoredProc
+    cmdSP_SQL.CommandText = "qryNisC_PickerClaimFiltersSet"
+    cmdSP_SQL.CommandTimeout = 1000
+        
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtUserName", adVarChar, adParamInput, 50, strUserName)
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtDate_Start", adDate, adParamInput, , Me.txtDate_Start.Value)
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtDate_End", adDate, adParamInput, , Me.txtDate_End.Value)
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtSU", adVarChar, adParamInput, 50, Me.txtClaim_SU.Value)
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtSU_01", adVarChar, adParamInput, 50, Me.txtClaim_SU_01.Value)
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtSU_02", adVarChar, adParamInput, 50, Me.txtClaim_SU_02.Value)
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtSU_03", adVarChar, adParamInput, 50, Me.txtClaim_SU_03.Value)
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtSU_04", adVarChar, adParamInput, 50, Me.txtClaim_SU_04.Value)
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtDealerNo", adVarChar, adParamInput, 50, Me.txtClaim_DealerAccNo.Value & "%")
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtPartNo", adVarChar, adParamInput, 50, Me.txtClaim_PartNumber.Value & "%")
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtPickerName", adVarChar, adParamInput, 50, Me.txtClaim_PickerFullName.Value)
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneA", adVarChar, adParamInput, 50, IIf(Me.txtZoneA.Value = 0, "-", "A"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneB", adVarChar, adParamInput, 50, IIf(Me.txtZoneB.Value = 0, "-", "B"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneC", adVarChar, adParamInput, 50, IIf(Me.txtZoneC.Value = 0, "-", "C"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneD", adVarChar, adParamInput, 50, IIf(Me.txtZoneD.Value = 0, "-", "D"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneE", adVarChar, adParamInput, 50, IIf(Me.txtZoneE.Value = 0, "-", "E"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneF", adVarChar, adParamInput, 50, IIf(Me.txtZoneF.Value = 0, "-", "F"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneG", adVarChar, adParamInput, 50, IIf(Me.txtZoneG.Value = 0, "-", "G"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneH", adVarChar, adParamInput, 50, IIf(Me.txtZoneG.Value = 0, "-", "H"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneI", adVarChar, adParamInput, 50, IIf(Me.txtZoneI.Value = 0, "-", "I"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneJ", adVarChar, adParamInput, 50, IIf(Me.txtZoneJ.Value = 0, "-", "J"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneK", adVarChar, adParamInput, 50, IIf(Me.txtZoneK.Value = 0, "-", "K"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneL", adVarChar, adParamInput, 50, IIf(Me.txtZoneL.Value = 0, "-", "L"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneM", adVarChar, adParamInput, 50, IIf(Me.txtZoneM.Value = 0, "-", "M"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneN", adVarChar, adParamInput, 50, IIf(Me.txtZoneN.Value = 0, "-", "N"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneO", adVarChar, adParamInput, 50, IIf(Me.txtZoneO.Value = 0, "-", "O"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneP", adVarChar, adParamInput, 50, IIf(Me.txtZoneP.Value = 0, "-", "P"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneQ", adVarChar, adParamInput, 50, IIf(Me.txtZoneQ.Value = 0, "-", "Q"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneR", adVarChar, adParamInput, 50, IIf(Me.txtZoneR.Value = 0, "-", "R"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneS", adVarChar, adParamInput, 50, IIf(Me.txtZoneS.Value = 0, "-", "S"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneT", adVarChar, adParamInput, 50, IIf(Me.txtZoneT.Value = 0, "-", "T"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneU", adVarChar, adParamInput, 50, IIf(Me.txtZoneU.Value = 0, "-", "U"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneV", adVarChar, adParamInput, 50, IIf(Me.txtZoneV.Value = 0, "-", "V"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneW", adVarChar, adParamInput, 50, IIf(Me.txtZoneW.Value = 0, "-", "W"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneX", adVarChar, adParamInput, 50, IIf(Me.txtZoneX.Value = 0, "-", "X"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneY", adVarChar, adParamInput, 50, IIf(Me.txtZoneY.Value = 0, "-", "Y"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneZ", adVarChar, adParamInput, 50, IIf(Me.txtZoneZ.Value = 0, "-", "Z"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC10", adVarChar, adParamInput, 50, IIf(Me.txtCC10.Value = 0, "0", "10"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC11", adVarChar, adParamInput, 50, IIf(Me.txtCC11.Value = 0, "0", "11"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC12", adVarChar, adParamInput, 50, IIf(Me.txtCC12.Value = 0, "0", "12"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC21", adVarChar, adParamInput, 50, IIf(Me.txtCC21.Value = 0, "0", "21"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC22", adVarChar, adParamInput, 50, IIf(Me.txtCC22.Value = 0, "0", "22"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC30", adVarChar, adParamInput, 50, IIf(Me.txtCC30.Value = 0, "0", "30"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC40", adVarChar, adParamInput, 50, IIf(Me.txtCC40.Value = 0, "0", "40"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC41", adVarChar, adParamInput, 50, IIf(Me.txtCC41.Value = 0, "0", "41"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC45", adVarChar, adParamInput, 50, IIf(Me.txtCC45.Value = 0, "0", "45"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC46", adVarChar, adParamInput, 50, IIf(Me.txtCC46.Value = 0, "0", "46"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC50", adVarChar, adParamInput, 50, IIf(Me.txtCC50.Value = 0, "0", "50"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC55", adVarChar, adParamInput, 50, IIf(Me.txtCC55.Value = 0, "0", "55"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC60", adVarChar, adParamInput, 50, IIf(Me.txtCC60.Value = 0, "0", "60"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC61", adVarChar, adParamInput, 50, IIf(Me.txtCC61.Value = 0, "0", "61"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC62", adVarChar, adParamInput, 50, IIf(Me.txtCC62.Value = 0, "0", "62"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC65", adVarChar, adParamInput, 50, IIf(Me.txtCC65.Value = 0, "0", "65"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC70", adVarChar, adParamInput, 50, IIf(Me.txtCC70.Value = 0, "0", "70"))
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtTeam_ID", adVarChar, adParamInput, 50, Me.Team_ID.Value)
+    cmdSP_SQL.Parameters.Append parmSP_SQL
+    cmdSP_SQL.Execute
+    
+End Sub
+
+Private Sub cmdGenReport_Detailed_Click()
+    Set_Filters
+    'Display Report
+    If IsNull(Me.txtClaim_PickerFullName) And IsNull(Me.Team_ID) Then
+        DoCmd.OpenReport "rptNisC_PickerClaimReport_Detailed", acViewPreview
+    Else
+        DoCmd.OpenReport "rptNisC_PickerClaimReport_Detailed_ByPicker", acViewPreview
+    End If
+End Sub
+
+Private Sub cmdZone_All_Click()
+    Me.txtRegion_A.Value = True
+    Me.txtRegion_B.Value = True
+    Me.txtRegion_C.Value = True
+    Me.txtRegion_D.Value = True
+    Me.txtRegion_E.Value = True
+    Me.txtRegion_F.Value = True
+End Sub
+
+Private Sub cmdZone_Clear_Click()
+    Me.txtRegion_A.Value = False
+    Me.txtRegion_B.Value = False
+    Me.txtRegion_C.Value = False
+    Me.txtRegion_D.Value = False
+    Me.txtRegion_E.Value = False
+    Me.txtRegion_F.Value = False
+End Sub
+
+
+
+
+Private Sub txtDate_Start_Click()
+
+End Sub

@@ -1,0 +1,272 @@
+Option Compare Database
+
+Private Sub Open_frm_ETD_Requests_Click()
+On Error GoTo Err_Open_frm_ETD_Requests_Click
+
+    Dim stDocName As String
+    Dim stLinkCriteria As String
+
+    stDocName = "frm_ETD_Requests"
+    DoCmd.OpenForm stDocName, , , stLinkCriteria
+
+Exit_Open_frm_ETD_Requests_Click:
+    Exit Sub
+
+Err_Open_frm_ETD_Requests_Click:
+    MsgBox Err.Description
+    Resume Exit_Open_frm_ETD_Requests_Click
+    
+End Sub
+Private Sub close_form_Click()
+On Error GoTo Err_close_form_Click
+
+
+    DoCmd.Close
+
+Exit_close_form_Click:
+    Exit Sub
+
+Err_close_form_Click:
+    MsgBox Err.Description
+    Resume Exit_close_form_Click
+    
+End Sub
+Private Sub Open_table_etd_requests_solved_Click()
+On Error GoTo Err_Open_table_etd_requests_solved_Click
+
+    Dim stDocName As String
+
+    stDocName = "Open Table ETD Requests Solved"
+    DoCmd.RunMacro stDocName
+
+Exit_Open_table_etd_requests_solved_Clic:
+    Exit Sub
+
+Err_Open_table_etd_requests_solved_Click:
+    MsgBox Err.Description
+    Resume Exit_Open_table_etd_requests_solved_Clic
+    
+End Sub
+Private Sub Run_qry_find_etd_information_Click()
+On Error GoTo Err_Run_qry_find_etd_information_Click
+
+    Dim stDocName As String
+
+    stDocName = "find etd information"
+    DoCmd.RunMacro stDocName
+
+Exit_Run_qry_find_etd_information_Click:
+    Exit Sub
+
+Err_Run_qry_find_etd_information_Click:
+    MsgBox Err.Description
+    Resume Exit_Run_qry_find_etd_information_Click
+    
+End Sub
+Private Sub run_qry_ICS_requests_all_info_Click()
+On Error GoTo Err_run_qry_ICS_requests_all_info_Click
+
+    Dim stDocName As String
+
+    stDocName = "ICS Requets all Info"
+    DoCmd.RunMacro stDocName
+
+Exit_run_qry_ICS_requests_all_info_Click:
+    Exit Sub
+
+Err_run_qry_ICS_requests_all_info_Click:
+    MsgBox Err.Description
+    Resume Exit_run_qry_ICS_requests_all_info_Click
+    
+End Sub
+Private Sub run_qry_ICS_requests_to_Ams_Click()
+On Error GoTo Err_run_qry_ICS_requests_to_Ams_Click
+
+    Dim stDocName As String
+
+    stDocName = "ICS Requests to Ams"
+    DoCmd.RunMacro stDocName
+
+Exit_run_qry_ICS_requests_to_Ams_Click:
+    Exit Sub
+
+Err_run_qry_ICS_requests_to_Ams_Click:
+    MsgBox Err.Description
+    Resume Exit_run_qry_ICS_requests_to_Ams_Click
+    
+End Sub
+Private Sub run_qry_ics_requests_no_response_Click()
+On Error GoTo Err_run_qry_ics_requests_no_response_Click
+
+    Dim stDocName As String
+
+    stDocName = "ICS Requests No Response"
+    DoCmd.RunMacro stDocName
+
+Exit_run_qry_ics_requests_no_response_Cl:
+    Exit Sub
+
+Err_run_qry_ics_requests_no_response_Click:
+    MsgBox Err.Description
+    Resume Exit_run_qry_ics_requests_no_response_Cl
+    
+End Sub
+Private Sub run_qry_outstanding_etd_requests_Click()
+On Error GoTo Err_run_qry_outstanding_etd_requests_Click
+
+    Dim stDocName As String
+
+    stDocName = "Outstanding ETD Requests"
+    DoCmd.RunMacro stDocName
+
+Exit_run_qry_outstanding_etd_requests_Cl:
+    Exit Sub
+
+Err_run_qry_outstanding_etd_requests_Click:
+    MsgBox Err.Description
+    Resume Exit_run_qry_outstanding_etd_requests_Cl
+    
+End Sub
+Private Sub open_form_etd_requests_Click()
+On Error GoTo Err_open_form_etd_requests_Click
+
+    Dim stDocName As String
+    Dim stLinkCriteria As String
+
+    stDocName = "frm_ETD_Requests2"
+    DoCmd.OpenForm stDocName, , , stLinkCriteria
+
+Exit_open_form_etd_requests_Click:
+    Exit Sub
+
+Err_open_form_etd_requests_Click:
+    MsgBox Err.Description
+    Resume Exit_open_form_etd_requests_Click
+    
+End Sub
+Private Sub run_macro_delete_solved_requests_Click()
+On Error GoTo Err_run_macro_delete_solved_requests_Click
+
+    Dim stDocName As String
+
+    stDocName = "archive solved requests"
+    DoCmd.RunMacro stDocName
+
+Exit_run_macro_delete_solved_requests_Cl:
+    Exit Sub
+
+Err_run_macro_delete_solved_requests_Click:
+    MsgBox Err.Description
+    Resume Exit_run_macro_delete_solved_requests_Cl
+    
+End Sub
+Private Sub run_macro_archive_solved_etd_requests_Click()
+On Error GoTo Err_run_macro_archive_solved_etd_requests_Click
+
+    Dim stDocName As String
+
+    stDocName = "archive solved requests"
+    DoCmd.RunMacro stDocName
+
+Exit_run_macro_archive_solved_etd_reques:
+    Exit Sub
+
+Err_run_macro_archive_solved_etd_requests_Click:
+    MsgBox Err.Description
+    Resume Exit_run_macro_archive_solved_etd_reques
+    
+End Sub
+Private Sub Command26_Click()
+On Error GoTo Err_Command26_Click
+
+    Dim stDocName As String
+
+    stDocName = "delete solved requests"
+    DoCmd.RunMacro stDocName
+
+Exit_Command26_Click:
+    Exit Sub
+
+Err_Command26_Click:
+    MsgBox Err.Description
+    Resume Exit_Command26_Click
+    
+End Sub
+Private Sub Run_Macro_Delete_solved_etd_requests_Click()
+On Error GoTo Err_Run_Macro_Delete_solved_etd_requests_Click
+
+    Dim stDocName As String
+
+    stDocName = "delete solved requests"
+    DoCmd.RunMacro stDocName
+
+Exit_Run_Macro_Delete_solved_etd_request:
+    Exit Sub
+
+Err_Run_Macro_Delete_solved_etd_requests_Click:
+    MsgBox Err.Description
+    Resume Exit_Run_Macro_Delete_solved_etd_request
+    
+End Sub
+Private Sub Command29_Click()
+On Error GoTo Err_Command29_Click
+
+    Dim stDocName As String
+
+    stDocName = "MCR_Part number search"
+    DoCmd.RunMacro stDocName
+
+Exit_Command29_Click:
+    Exit Sub
+
+Err_Command29_Click:
+    MsgBox Err.Description
+    Resume Exit_Command29_Click
+    
+End Sub
+Private Sub Command70_Click()
+On Error GoTo Err_Command70_Click
+
+    Dim stDocName As String
+
+    stDocName = "Qry_AmsETDInfo"
+    DoCmd.OpenQuery stDocName, acNormal, acEdit
+
+Exit_Command70_Click:
+    Exit Sub
+
+Err_Command70_Click:
+    MsgBox Err.Description
+    Resume Exit_Command70_Click
+    
+End Sub
+Private Sub Command81_Click()
+On Error GoTo Err_Command81_Click
+
+
+    DoCmd.DoMenuItem acFormBar, acRecordsMenu, 5, , acMenuVer70
+
+Exit_Command81_Click:
+    Exit Sub
+
+Err_Command81_Click:
+    MsgBox Err.Description
+    Resume Exit_Command81_Click
+    
+End Sub
+
+Private Sub Command86_Click()
+Dim ETD As ETD_Process
+Set ETD = New ETD_Process
+
+With ETD
+    .ETD_file_name = "G:\xxNPO\VOR files\ZVOR_Search.xlsm"
+    .Query = "ZVOR_ETD_PARTs"
+End With
+
+ETD.Create_Objects
+ETD.Delete_old_content
+ETD.Export_Access_to_Excel
+
+
+End Sub

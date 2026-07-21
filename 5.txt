@@ -1,0 +1,163 @@
+Option Compare Database
+Option Explicit
+
+Sub Test()
+
+
+Dim CurrentRow As Integer
+Dim PartNoColumn As Integer
+Dim ETDColumn As Integer
+Dim TransMColumn As Integer
+Dim OrderClassColumn As Integer
+Dim BOSymbolColumn As Integer
+Dim QtyColumn As Integer
+Dim StatusColumn As Integer
+
+Dim CurrentPartNo As String
+Dim CurrentETD As String
+Dim CurrentQty As String
+
+Dim CurrentStatus As String
+Dim x As Integer
+Dim WaitOK As Variant
+
+CurrentRow = 2
+PartNoColumn = 1
+ETDColumn = 2
+QtyColumn = 3
+StatusColumn = 4
+
+CurrentPartNo = ActiveSheet.Cells(CurrentRow, PartNoColumn)
+CurrentETD = ActiveSheet.Cells(CurrentRow, ETDColumn)
+CurrentQty = ActiveSheet.Cells(CurrentRow, QtyColumn)
+CurrentStatus = "Unknown Status"
+ActiveSheet.Cells(CurrentRow, StatusColumn).Font.Bold = True
+ActiveSheet.Cells(CurrentRow, StatusColumn).Font.Color = vbRed
+
+Do While CurrentPartNo <> ""
+    If ExtraScreen.GetString(3, 14, Len("M009000G")) = "M009000G" Then
+        ExtraScreen.SendKeys ("13<Enter>")
+        
+        If ExtraScreen.WaitForString("M009001G", 6, 71) = False Then
+            MsgBox "Error navigating to 'M009001G'", vbCritical
+            Exit Sub
+        End If
+    End If
+    
+    If ExtraScreen.GetString(3, 13, Len("M009001G")) = "M009001G" Then
+        ExtraScreen.SendKeys ("11<Enter>")
+        
+        If ExtraScreen.WaitForString("NPS025M0", 3, 3) = False Then
+            MsgBox "Error navigating to 'NPS025M0'", vbCritical
+            Exit Sub
+        End If
+    End If
+    
+    If ExtraScreen.GetString(3, 13, Len("NPS025M0")) = "NPS025M0" Then
+        ExtraScreen.SendKeys ("1<Enter>")
+        
+        If ExtraScreen.WaitForString("NPS025P1", 3, 3) = False Then
+            MsgBox "Error navigating to 'NPS025P1'", vbCritical
+            Exit Sub
+        End If
+    End If
+    
+    If ExtraScreen.GetString(3, 3, Len("NPS025P1")) <> "NPS025P1" Then
+        MsgBox "Error navigating to 'NPS025P1'", vbCritical
+        Exit Sub
+    End If
+    
+    Do Until ExtraScreen.Row = 5 And ExtraScreen.Col = 24
+        ExtraScreen.MoveTo 5, 24, Null
+    Loop
+    ExtraScreen.SendKeys (CurrentPartNo)
+    
+    Do Until ExtraScreen.Row = 13 And ExtraScreen.Col = 29
+        ExtraScreen.MoveTo 13, 29, Null
+    Loop
+    ExtraScreen.SendKeys (CurrentETD)
+    
+    Do Until ExtraScreen.Row = 13 And ExtraScreen.Col = 45
+        ExtraScreen.MoveTo 13, 45, Null
+    Loop
+    ExtraScreen.SendKeys (CurrentQty)
+    
+    ExtraScreen.SendKeys ("<PF8>")
+    ExtraScreen.WaitHostQuiet (500)
+    If Trim(ExtraScreen.GetString(1, 2, 80)) <> "Part: " & CurrentPartNo & " - ETD Table Updated" Then
+        If Trim(ExtraScreen.GetString(1, 1, 80)) <> "" Then
+            CurrentStatus = Trim(ExtraScreen.GetString(1, 1, 80))
+        Else
+            CurrentStatus = "Problem - screen: " & Trim(ExtraScreen.GetString(3, 3, 10))
+        End If
+    Else
+        ActiveSheet.Cells(CurrentRow, StatusColumn).Font.Bold = True
+        ActiveSheet.Cells(CurrentRow, StatusColumn).Font.Color = vbGreen
+    End If
+    
+        
+NextPart:
+
+    If ExtraScreen.GetString(3, 3, Len("NPS025P1")) <> "NPS025P1" Then
+            ExtraScreen.SendKeys ("<PF11>")
+            ExtraScreen.WaitHostQuiet (500)
+    End If
+    
+    ActiveSheet.Cells(CurrentRow, StatusColumn) = CurrentStatus
+    
+    CurrentRow = CurrentRow + 1
+    
+    CurrentPartNo = ActiveSheet.Cells(CurrentRow, PartNoColumn)
+    CurrentETD = ActiveSheet.Cells(CurrentRow, ETDColumn)
+    CurrentQty = ActiveSheet.Cells(CurrentRow, QtyColumn)
+    CurrentStatus = "Unknown Status"
+    ActiveSheet.Cells(CurrentRow, StatusColumn).Font.Bold = True
+    ActiveSheet.Cells(CurrentRow, StatusColumn).Font.Color = vbRed
+    
+Loop
+
+myWorkbook2.Activate
+ActiveWorkbook.Close
+
+MsgBox "Finished", vbInformation + vbOKOnly, "Finished"
+
+
+End Sub
+
+
+
+Private Sub OpenAttachmate()
+
+Set ExtraSystem = CreateObject("BZWhll.WhllObj")
+
+If ExtraSystem Is Nothing Then
+    MsgBox ("Could not create system object")
+    End
+End If
+
+Set ExtraSessions = ExtraSystem.Sessions
+
+If ExtraSessions Is Nothing Then
+    MsgBox ("Could not create sessions object")
+    End
+End If
+
+Set ExtraSession = ExtraSystem.ActiveSession
+
+If ExtraSession Is Nothing Then
+    MsgBox ("Could not create session object")
+    End
+End If
+
+Set ExtraScreen = ExtraSession.Screen
+
+If ExtraScreen Is Nothing Then
+    MsgBox ("Could not create screen object")
+    End
+End If
+
+ExtraSystem.TimeoutValue = 30000
+ExtraSession.Visible = True
+
+End Sub
+

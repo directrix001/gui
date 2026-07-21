@@ -1,0 +1,26 @@
+Option Compare Database
+Option Explicit
+
+
+ Sub Command0_Click()
+
+Application.VBE.MainWindow.Visible = True
+Application.VBE.MainWindow.Visible = False
+
+DoCmd.Close acForm, "frm_part Number info", acSaveNo
+DoCmd.RunSavedImportExport ("import-BO_UK-rdc")
+  
+Dim ETD As ETD_Process
+Set ETD = New ETD_Process
+
+With ETD
+    .ETD_file_name = "P:\UKRDC\ETD\Assign New ETD.xls"
+    .Query = "ETD COUNT DATE QRY"
+End With
+
+ETD.Create_Objects
+ETD.Export_Access_to_Excel
+ETD.Format_Data
+ETD.Export_NPOPS
+
+End Sub

@@ -1,0 +1,38 @@
+Option Compare Database
+Option Explicit
+
+Public ObjExcel As Excel.Application
+Public ETD_file_name As String
+Public ETD_file As workbook
+Public Dropoff As Worksheet
+Public DB As Database
+Public RS As DAO.Recordset
+Public Query As String
+
+
+Sub Create_Objects()
+
+Set ObjExcel = New Excel.Application
+ObjExcel.Visible = True
+Set ETD_file = ObjExcel.Workbooks.Open(ETD_file_name)
+Set Dropoff = ETD_file.Sheets("Dropoff")
+
+
+End Sub
+
+
+
+Sub Export_Access_to_Excel()
+
+
+Set DB = CurrentDb
+Set RS = DB.OpenRecordset(Query, dbOpenSnapshot)
+
+Dropoff.Range("ABZ").CopyFromRecordset RS
+
+Set RS = Nothing
+Set DB = Nothing
+
+
+
+End Sub

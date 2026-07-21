@@ -1,0 +1,282 @@
+Option Compare Database
+Option Explicit
+
+
+Public ObjExcel As Excel.Application
+Public ETD_file_name As String
+Public ETD_file As workbook
+Public Dropoff As Worksheet
+Public DB As Database
+Public RS As DAO.Recordset
+Public Query As String
+
+Const conRange = "ABZ"
+
+Dim RecCount As Long
+Dim ExtraSystem As Object
+Dim ExtraSessions As Object
+Dim ExtraSession As Object
+Dim ExtraScreen As Object
+
+
+Sub Create_Objects()
+
+Set ObjExcel = New Excel.Application
+ObjExcel.Visible = True
+Set ETD_file = ObjExcel.Workbooks.Open(ETD_file_name)
+Set Dropoff = ETD_file.Sheets("Dropoff")
+
+
+End Sub
+
+Sub Delete_old_content()
+
+Dropoff.Range("a7:z10000").ClearContents
+Dropoff.Range("a7:z10000").Interior.ColorIndex = 0
+
+End Sub
+
+Sub Export_Access_to_Excel()
+
+
+Set DB = CurrentDb
+Set RS = DB.OpenRecordset(Query, dbOpenSnapshot)
+
+Dropoff.Range("ABZ").CopyFromRecordset RS
+
+Set RS = Nothing
+Set DB = Nothing
+
+
+
+End Sub
+
+Sub Format_Data()
+
+Dim lastrow As Integer
+Dim x As Integer
+
+    lastrow = Cells(Rows.Count, 1).End(xlUp).Row
+    
+
+
+    Range("b2:b" & lastrow).TextToColumns Destination:=Range("B2"), DataType:=xlDelimited, _
+        TextQualifier:=xlDoubleQuote, ConsecutiveDelimiter:=False, Tab:=True, _
+        Semicolon:=False, Comma:=False, Space:=False, Other:=False, FieldInfo _
+        :=Array(1, 4), TrailingMinusNumbers:=True
+        
+    Columns("C:d").Insert shift:=xlToRight, copyorigin:=xlFormatFromLeftOrAbove
+    
+    Range("c2:c" & lastrow).Value = "=b2+7"
+    Range("d2:d" & lastrow).Value = "=TEXT(c2,""ddmmyy"")"
+    Range("B2:D2").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Selection.Copy
+    Selection.PasteSpecial Paste:=xlPasteValues, Operation:=xlNone, SkipBlanks _
+        :=False, Transpose:=False
+    Range("H6").Select
+    Cells.Select
+    ActiveWorkbook.Worksheets(1).Sort.SortFields.Clear
+    ActiveWorkbook.Worksheets(1).Sort.SortFields.Add Key:=Range("E2:E" & lastrow) _
+        , SortOn:=xlSortOnValues, Order:=xlDescending, DataOption:=xlSortNormal
+    ActiveWorkbook.Worksheets(1).Sort.SortFields.Add Key:=Range("A2:A" & lastrow) _
+        , SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:= _
+        xlSortTextAsNumbers
+    ActiveWorkbook.Worksheets(1).Sort.SortFields.Add Key:=Range("B2:B" & lastrow) _
+        , SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    With ActiveWorkbook.Worksheets(1).Sort
+        .SetRange Range("A1:E" & lastrow)
+        .Header = xlYes
+        .MatchCase = False
+        .Orientation = xlTopToBottom
+        .SortMethod = xlPinYin
+        .Apply
+    End With
+    Range("D2").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Selection.Copy
+    ActiveWindow.SmallScroll Down:=-33
+    Range("B2").Select
+    ActiveSheet.Paste
+    Columns("C:D").Select
+    Selection.ClearContents
+    Selection.Delete shift:=xlToLeft
+    Range("e2:e" & lastrow).Value = "=len(a2)"
+    ActiveWorkbook.Worksheets(1).Sort.SortFields.Clear
+    ActiveWorkbook.Worksheets(1).Sort.SortFields.Add Key:=Range("e2:e" & lastrow) _
+        , SortOn:=xlSortOnValues, Order:=xlAscending, DataOption:=xlSortNormal
+    With ActiveWorkbook.Worksheets(1).Sort
+        .SetRange Range("A1:e" & lastrow)
+        .Header = xlYes
+        .MatchCase = False
+        .Orientation = xlTopToBottom
+        .SortMethod = xlPinYin
+        .Apply
+    End With
+    Columns("e:e").Select
+    Selection.Delete shift:=xlToLeft
+
+ActiveSheet.Range("$A$1:$C$" & lastrow).RemoveDuplicates Columns:=1, Header:=xlYes
+
+
+End Sub
+
+Sub Export_NPOPS()
+
+OpenAttachmate
+
+Dim CurrentRow As Integer
+Dim PartNoColumn As Integer
+Dim ETDColumn As Integer
+Dim TransMColumn As Integer
+Dim OrderClassColumn As Integer
+Dim BOSymbolColumn As Integer
+Dim QtyColumn As Integer
+Dim StatusColumn As Integer
+
+Dim CurrentPartNo As String
+Dim CurrentETD As String
+Dim CurrentQty As String
+
+Dim CurrentStatus As String
+Dim x As Integer
+Dim WaitOK As Variant
+
+CurrentRow = 2
+PartNoColumn = 1
+ETDColumn = 2
+QtyColumn = 3
+StatusColumn = 4
+
+CurrentPartNo = Dropoff.Cells(CurrentRow, PartNoColumn)
+CurrentETD = Dropoff.Cells(CurrentRow, ETDColumn)
+CurrentQty = Dropoff.Cells(CurrentRow, QtyColumn)
+CurrentStatus = "Unknown Status"
+Dropoff.Cells(CurrentRow, StatusColumn).Font.Bold = True
+Dropoff.Cells(CurrentRow, StatusColumn).Font.Color = vbRed
+
+Do While CurrentPartNo <> ""
+    If ExtraScreen.GetString(3, 14, Len("M009000G")) = "M009000G" Then
+        ExtraScreen.SendKeys ("13<Enter>")
+        
+        If ExtraScreen.WaitForString("M009001G", 6, 71) = False Then
+            MsgBox "Error navigating to 'M009001G'", vbCritical
+            Exit Sub
+        End If
+    End If
+    
+    If ExtraScreen.GetString(3, 13, Len("M009001G")) = "M009001G" Then
+        ExtraScreen.SendKeys ("11<Enter>")
+        
+        If ExtraScreen.WaitForString("NPS025M0", 3, 3) = False Then
+            MsgBox "Error navigating to 'NPS025M0'", vbCritical
+            Exit Sub
+        End If
+    End If
+    
+    If ExtraScreen.GetString(3, 13, Len("NPS025M0")) = "NPS025M0" Then
+        ExtraScreen.SendKeys ("1<Enter>")
+        
+        If ExtraScreen.WaitForString("NPS025P1", 3, 3) = False Then
+            MsgBox "Error navigating to 'NPS025P1'", vbCritical
+            Exit Sub
+        End If
+    End If
+    
+    If ExtraScreen.GetString(3, 3, Len("NPS025P1")) <> "NPS025P1" Then
+        MsgBox "Error navigating to 'NPS025P1'", vbCritical
+        Exit Sub
+    End If
+    
+    Do Until ExtraScreen.Row = 5 And ExtraScreen.Col = 24
+        ExtraScreen.MoveTo 5, 24, Null
+    Loop
+    ExtraScreen.SendKeys (CurrentPartNo)
+    
+    Do Until ExtraScreen.Row = 13 And ExtraScreen.Col = 29
+        ExtraScreen.MoveTo 13, 29, Null
+    Loop
+    ExtraScreen.SendKeys (CurrentETD)
+    
+    Do Until ExtraScreen.Row = 13 And ExtraScreen.Col = 45
+        ExtraScreen.MoveTo 13, 45, Null
+    Loop
+    ExtraScreen.SendKeys (CurrentQty)
+    
+    ExtraScreen.SendKeys ("<PF8>")
+    ExtraScreen.WaitHostQuiet (500)
+    If Trim(ExtraScreen.GetString(1, 2, 80)) <> "Part: " & CurrentPartNo & " - ETD Table Updated" Then
+        If Trim(ExtraScreen.GetString(1, 1, 80)) <> "" Then
+            CurrentStatus = Trim(ExtraScreen.GetString(1, 1, 80))
+        Else
+            CurrentStatus = "Problem - screen: " & Trim(ExtraScreen.GetString(3, 3, 10))
+        End If
+    Else
+        ActiveSheet.Cells(CurrentRow, StatusColumn).Font.Bold = True
+        ActiveSheet.Cells(CurrentRow, StatusColumn).Font.Color = vbGreen
+    End If
+    
+        
+NextPart:
+
+    If ExtraScreen.GetString(3, 3, Len("NPS025P1")) <> "NPS025P1" Then
+            ExtraScreen.SendKeys ("<PF11>")
+            ExtraScreen.WaitHostQuiet (500)
+    End If
+    
+    Dropoff.Cells(CurrentRow, StatusColumn) = CurrentStatus
+    
+    CurrentRow = CurrentRow + 1
+    
+    CurrentPartNo = Dropoff.Cells(CurrentRow, PartNoColumn)
+    CurrentETD = Dropoff.Cells(CurrentRow, ETDColumn)
+    CurrentQty = Dropoff.Cells(CurrentRow, QtyColumn)
+    CurrentStatus = "Unknown Status"
+    Dropoff.Cells(CurrentRow, StatusColumn).Font.Bold = True
+    Dropoff.Cells(CurrentRow, StatusColumn).Font.Color = vbRed
+    
+Loop
+
+
+MsgBox "Finished", vbInformation + vbOKOnly, "Finished"
+
+
+End Sub
+
+
+
+Private Sub OpenAttachmate()
+
+Set ExtraSystem = CreateObject("BZWhll.WhllObj")
+
+If ExtraSystem Is Nothing Then
+    MsgBox ("Could not create system object")
+    End
+End If
+
+Set ExtraSessions = ExtraSystem.Sessions
+
+If ExtraSessions Is Nothing Then
+    MsgBox ("Could not create sessions object")
+    End
+End If
+
+Set ExtraSession = ExtraSystem.ActiveSession
+
+If ExtraSession Is Nothing Then
+    MsgBox ("Could not create session object")
+    End
+End If
+
+Set ExtraScreen = ExtraSession.Screen
+
+If ExtraScreen Is Nothing Then
+    MsgBox ("Could not create screen object")
+    End
+End If
+
+ExtraSystem.TimeoutValue = 30000
+ExtraSession.Visible = True
+
+End Sub
+
