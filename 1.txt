@@ -3,3 +3,7 @@
 - ODBC driver for Microsoft Access / SQL Server
 - Network access to shared drives (P:\, G:\)
 write the above in a short meesage hi liam,in a discusiion with crish he mentioned that this python solution is a temporay solution (Can I just add to this that the Python solution is only temporary to get us off this 32-bit desktop, I would expect Genpact to be including these macros in the bigger plan to move away from them.) now wanted ask to your expertise to get an idea on the next bigger picture so that i would be benefitial for bith sides to work on that than to work more on the temporary soltion .write in a clean meeage
+
+
+
+Hi Liam, quick one — in a chat with Chris he flagged that this Python solution is really just temporary, to get us off the 32-bit desktop dependency, and that longer-term he'd expect these macros to be replaced properly rather than just ported. Rather than us putting more effort into the temp fix, how can we shift focus toward the bigger picture plan instead? Would love to get your expertise on any ideas for what that longer-term direction could look like, so both sides can align early rather than duplicate effort.
