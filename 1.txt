@@ -2,3 +2,4 @@
 - Windows environment with BlueZone terminal emulator installed
 - ODBC driver for Microsoft Access / SQL Server
 - Network access to shared drives (P:\, G:\)
+write the above in a short meesage hi liam,in a discusiion with crish he mentioned that this python solution is a temporay solution (Can I just add to this that the Python solution is only temporary to get us off this 32-bit desktop, I would expect Genpact to be including these macros in the bigger plan to move away from them.) now wanted ask to your expertise to get an idea on the next bigger picture so that i would be benefitial for bith sides to work on that than to work more on the temporary soltion .write in a clean meeage
