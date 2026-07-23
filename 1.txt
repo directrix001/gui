@@ -8,3 +8,20 @@ write the above in a short meesage hi liam,in a discusiion with crish he mention
 
 Hi Liam, quick one — in a chat with Chris he flagged that this Python solution is really just temporary, to get us off the 32-bit desktop dependency, and that longer-term he'd expect these macros to be replaced properly rather than just ported. Rather than us putting more effort into the temp fix, how can we shift focus toward the bigger picture plan instead? Would love to get your expertise on any ideas for what that longer-term direction could look like, so both sides can align early rather than duplicate effort.
 Hi Liam, quick one — in a chat with Chris he flagged that this Python solution is really just temporary, to get us off the 32-bit desktop dependency, and that longer-term he'd expect these macros to be replaced properly rather than just ported. How can we work on the bigger picture plan simultaneously alongside this? Would love to get your expertise on any ideas for what that longer-term direction could look like, so both sides can align early rather than duplicate effort.
+
+
+
+
+Subject: Python 3.10 Install on Prem's Citrix System + Test Environment & Approach Confirmation
+
+Hi Liam,
+
+A few things we need confirmed/actioned for the ETD/NPOPS Python migration:
+
+To have the VBA macro replacement run on Prem's system, we need Python 3.10+ (32-bit) installed on his machine. Prem's system runs 64-bit Windows, but the current VBA macro relies on 32-bit Office for compatibility with BlueZone's 32-bit COM object. The Python replacement needs the same — 32-bit Python installed on that 64-bit system, running alongside the existing setup, so it can talk to BlueZone directly. Please arrange this install.
+Could you please confirm whether there is any separate test environment available, so that we can validate the tool without affecting the main production database?
+We'd also like your input on the right long-term approach. Right now, the tool is built to run via terminal/command line (no UI, someone types a command and it executes). We wanted to check whether this is an acceptable way to run it going forward, or whether you'd recommend we look at an RPA-based approach instead — especially since Chris mentioned this Python solution is meant to be temporary, and we don't want to over-invest in the terminal-based setup if a different direction is preferred.
+
+Let us know your thoughts on all three, happy to jump on a call if useful.
+
+Thanks,
