@@ -1,3 +1,6 @@
+https://cloud.uipath.com/zenpahkqnxet/apps_/default/run/default/ID5c78cf309adf4a17b876f9af6aaf1f26?el=vb&ctid=0c4d27f7-21b3-4194-8330-3f28c84a2b3c
+
+
 - Python 3.10+ (32-bit) for BlueZone COM compatibility
 - Windows environment with BlueZone terminal emulator installed
 - ODBC driver for Microsoft Access / SQL Server
