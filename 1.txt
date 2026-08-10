@@ -1,30 +1,192 @@
-https://cloud.uipath.com/zenpahkqnxet/apps_/default/run/default/ID5c78cf309adf4a17b876f9af6aaf1f26?el=vb&ctid=0c4d27f7-21b3-4194-8330-3f28c84a2b3c
 
+THAPASE, THUMMAGINJALA 0 minutes 4 seconds
+Let me know if you can see my screen.
 
-- Python 3.10+ (32-bit) for BlueZone COM compatibility
-- Windows environment with BlueZone terminal emulator installed
-- ODBC driver for Microsoft Access / SQL Server
-- Network access to shared drives (P:\, G:\)
-write the above in a short meesage hi liam,in a discusiion with crish he mentioned that this python solution is a temporay solution (Can I just add to this that the Python solution is only temporary to get us off this 32-bit desktop, I would expect Genpact to be including these macros in the bigger plan to move away from them.) now wanted ask to your expertise to get an idea on the next bigger picture so that i would be benefitial for bith sides to work on that than to work more on the temporary soltion .write in a clean meeage
+Anurag, Abhinav
+0 minutes 6 seconds0:06
+Anurag, Abhinav 0 minutes 6 seconds
+Yes, I can see that, yeah.
 
+THAPASE, THUMMAGINJALA
+0 minutes 9 seconds0:09
+THAPASE, THUMMAGINJALA 0 minutes 9 seconds
+So...
+THAPASE, THUMMAGINJALA 0 minutes 11 seconds
+Just to make sure, there is still some data validation needs to be done. So I have just shared a sample links for you so that you can cross-check it if it's possible for you to link these websites or not. Okay.
 
+Anurag, Abhinav
+0 minutes 20 seconds0:20
+Anurag, Abhinav 0 minutes 20 seconds
+Mhm.
 
-Hi Liam, quick one — in a chat with Chris he flagged that this Python solution is really just temporary, to get us off the 32-bit desktop dependency, and that longer-term he'd expect these macros to be replaced properly rather than just ported. Rather than us putting more effort into the temp fix, how can we shift focus toward the bigger picture plan instead? Would love to get your expertise on any ideas for what that longer-term direction could look like, so both sides can align early rather than duplicate effort.
-Hi Liam, quick one — in a chat with Chris he flagged that this Python solution is really just temporary, to get us off the 32-bit desktop dependency, and that longer-term he'd expect these macros to be replaced properly rather than just ported. How can we work on the bigger picture plan simultaneously alongside this? Would love to get your expertise on any ideas for what that longer-term direction could look like, so both sides can align early rather than duplicate effort.
+THAPASE, THUMMAGINJALA
+0 minutes 24 seconds0:24
+THAPASE, THUMMAGINJALA 0 minutes 24 seconds
+So this Excel sheet is divided into basically 4 things. One is LME, the other one is Midwest. So the important thing is for an aluminum price, we need to add LME base price and Midwest Premium. Midwest Premium is nothing but LME is London Metal Exchange.
+THAPASE, THUMMAGINJALA 0 minutes 43 seconds
+where the aluminum is traded based on that price. But US Midwest is a duty or a premium you need to add to that base price since this is being bought in US. Okay, so that's the reason you need to add LME plus Midwest.
 
+Anurag, Abhinav
+0 minutes 56 seconds0:56
+Anurag, Abhinav 0 minutes 56 seconds
+Okay.
 
+THAPASE, THUMMAGINJALA
+1 minute1:00
+THAPASE, THUMMAGINJALA 1 minute
+So, here...
 
+Anurag, Abhinav
+36 minutes 52 seconds36:52
+Anurag, Abhinav 36 minutes 52 seconds
+We will, we will see to it the past, we will run a feasibility analysis to see, you know, what we can cover in the present scope and whatnot, because you know, there are some, there are some additional insights that we would also be again deep diving into, because this was the first session, and I'm pretty sure that you know.
 
-Subject: Python 3.10 Install on Prem's Citrix System + Test Environment & Approach Confirmation
+THAPASE, THUMMAGINJALA
+37 minutes 1 second37:01
+THAPASE, THUMMAGINJALA 37 minutes 1 second
+Okay.
 
-Hi Liam,
+Anurag, Abhinav
+37 minutes 13 seconds37:13
+Anurag, Abhinav 37 minutes 13 seconds
+there would still be some loose ends for the team to actually tie. So we will get back to you for sure on this.
 
-A few things we need confirmed/actioned for the ETD/NPOPS Python migration:
+THAPASE, THUMMAGINJALA
+37 minutes 18 seconds37:18
+THAPASE, THUMMAGINJALA 37 minutes 18 seconds
+Okay.
+THAPASE, THUMMAGINJALA 37 minutes 22 seconds
+Sure, sure. We can have a weekly call if it's possible. We can check for any updates and any day clarifications as well. We can use that call.
 
-To have the VBA macro replacement run on Prem's system, we need Python 3.10+ (32-bit) installed on his machine. Prem's system runs 64-bit Windows, but the current VBA macro relies on 32-bit Office for compatibility with BlueZone's 32-bit COM object. The Python replacement needs the same — 32-bit Python installed on that 64-bit system, running alongside the existing setup, so it can talk to BlueZone directly. Please arrange this install.
-Could you please confirm whether there is any separate test environment available, so that we can validate the tool without affecting the main production database?
-We'd also like your input on the right long-term approach. Right now, the tool is built to run via terminal/command line (no UI, someone types a command and it executes). We wanted to check whether this is an acceptable way to run it going forward, or whether you'd recommend we look at an RPA-based approach instead — especially since Chris mentioned this Python solution is meant to be temporary, and we don't want to over-invest in the terminal-based setup if a different direction is preferred.
+Bera, Debabrata
+37 minutes 32 seconds37:32
+Bera, Debabrata 37 minutes 32 seconds
+So, are you asking to?
+Bera, Debabrata 37 minutes 35 seconds
+Predict this column, yes.
 
-Let us know your thoughts on all three, happy to jump on a call if useful.
+THAPASE, THUMMAGINJALA
+37 minutes 37 seconds37:37
+THAPASE, THUMMAGINJALA 37 minutes 37 seconds
+Yeah, columnists.
 
-Thanks,
+Bera, Debabrata
+37 minutes 40 seconds37:40
+Bera, Debabrata 37 minutes 40 seconds
+No.
+Bera, Debabrata 37 minutes 41 seconds
+This is coming from some mathematical calculation, right?
+
+THAPASE, THUMMAGINJALA
+37 minutes 46 seconds37:46
+THAPASE, THUMMAGINJALA 37 minutes 46 seconds
+Huh, mathematical calculation based on the current trend, but for the future 12 months, we need to predict it, correct? This column, so I was I was asking for 12 months in the future.
+
+Bera, Debabrata
+37 minutes 55 seconds37:55
+Bera, Debabrata 37 minutes 55 seconds
+Okay, okay.
+Bera, Debabrata 38 minutes 1 second
+Okay, and that 12 months, what like you need forecast for every day or like a quarterly lesson next like a four quarters, what will be the price a month end?
+
+THAPASE, THUMMAGINJALA
+38 minutes 9 seconds38:09
+THAPASE, THUMMAGINJALA 38 minutes 9 seconds
+Month.
+THAPASE, THUMMAGINJALA 38 minutes 11 seconds
+Monthly, monthly forecast.
+
+Bera, Debabrata
+38 minutes 12 seconds38:12
+Bera, Debabrata 38 minutes 12 seconds
+monthly, monthly forecast, okay. Okay, so that means teams you have to look into, let's see what about inputs are coming, how that is going to also behave for your future. Okay, so think about that when you are anticipating this ML model.
+Bera, Debabrata 38 minutes 35 seconds
+What will be the impact of those variables over the time?
+
+THAPASE, THUMMAGINJALA
+38 minutes 42 seconds38:42
+THAPASE, THUMMAGINJALA 38 minutes 42 seconds
+So all the four inputs which are mentioned, I'll only have historical data. For all the four inputs, you need to do some forecast and get what will be their characteristics in the future and then predict the CS column, as you mentioned.
+
+Bera, Debabrata
+38 minutes 57 seconds38:57
+Bera, Debabrata 38 minutes 57 seconds
+Okay, and how many like a volts like a quarters you do have if you go in the left here?
+
+THAPASE, THUMMAGINJALA
+39 minutes 3 seconds39:03
+THAPASE, THUMMAGINJALA 39 minutes 3 seconds
+We have very less here, like one, two, three.
+THAPASE, THUMMAGINJALA 39 minutes 10 seconds
+Four.
+THAPASE, THUMMAGINJALA 39 minutes 11 seconds
+Before, I guess, three.
+
+Bera, Debabrata
+39 minutes 12 seconds39:12
+Bera, Debabrata 39 minutes 12 seconds
+Okay, 4 quarters, right?
+
+THAPASE, THUMMAGINJALA
+39 minutes 14 seconds39:14
+THAPASE, THUMMAGINJALA 39 minutes 14 seconds
+Three, 4, yeah, 4.
+THAPASE, THUMMAGINJALA 39 minutes 17 seconds
+Four, 5. I have another one here, 5.
+
+Bera, Debabrata
+39 minutes 19 seconds39:19
+Bera, Debabrata 39 minutes 19 seconds
+Okay, okay.
+Bera, Debabrata 39 minutes 21 seconds
+Fine, seem like we have to look into this historical data also, right?
+
+Anurag, Abhinav
+39 minutes 31 seconds39:31
+Anurag, Abhinav 39 minutes 31 seconds
+Listening with them.
+
+THAPASE, THUMMAGINJALA
+39 minutes 34 seconds39:34
+THAPASE, THUMMAGINJALA 39 minutes 34 seconds
+Any other questions?
+
+Bera, Debabrata
+39 minutes 37 seconds39:37
+Bera, Debabrata 39 minutes 37 seconds
+No.
+
+THAPASE, THUMMAGINJALA
+39 minutes 43 seconds39:43
+THAPASE, THUMMAGINJALA 39 minutes 43 seconds
+Okay, if you have any other questions, just feel free to message me at any time and we can connect on a quick call as well.
+
+Anurag, Abhinav
+39 minutes 52 seconds39:52
+Anurag, Abhinav 39 minutes 52 seconds
+Sure, sure, Bhaskar. We can do that, yeah.
+
+Bera, Debabrata
+39 minutes 59 seconds39:59
+Bera, Debabrata 39 minutes 59 seconds
+Okay, thank you.
+
+THAPASE, THUMMAGINJALA
+40 minutes40:00
+THAPASE, THUMMAGINJALA 40 minutes
+Thank you.
+
+Pattanayak, Ankan
+40 minutes40:00
+Pattanayak, Ankan 40 minutes
+Thank you. Thank you, Prerna.
+
+Anurag, Abhinav
+40 minutes 2 seconds40:02
+Anurag, Abhinav 40 minutes 2 seconds
+Thanks everyone. Bye.
+
+DAHIYA, ROHIT
+40 minutes 3 seconds40:03
+DAHIYA, ROHIT 40 minutes 3 seconds
+Thanks, everyone. Bye.
