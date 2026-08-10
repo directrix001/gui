@@ -1,272 +1,65 @@
-Option Compare Database
-
-Private Sub Open_frm_ETD_Requests_Click()
-On Error GoTo Err_Open_frm_ETD_Requests_Click
-
-    Dim stDocName As String
-    Dim stLinkCriteria As String
-
-    stDocName = "frm_ETD_Requests"
-    DoCmd.OpenForm stDocName, , , stLinkCriteria
-
-Exit_Open_frm_ETD_Requests_Click:
-    Exit Sub
-
-Err_Open_frm_ETD_Requests_Click:
-    MsgBox Err.Description
-    Resume Exit_Open_frm_ETD_Requests_Click
-    
-End Sub
-Private Sub close_form_Click()
-On Error GoTo Err_close_form_Click
-
-
-    DoCmd.Close
-
-Exit_close_form_Click:
-    Exit Sub
-
-Err_close_form_Click:
-    MsgBox Err.Description
-    Resume Exit_close_form_Click
-    
-End Sub
-Private Sub Open_table_etd_requests_solved_Click()
-On Error GoTo Err_Open_table_etd_requests_solved_Click
-
-    Dim stDocName As String
-
-    stDocName = "Open Table ETD Requests Solved"
-    DoCmd.RunMacro stDocName
-
-Exit_Open_table_etd_requests_solved_Clic:
-    Exit Sub
-
-Err_Open_table_etd_requests_solved_Click:
-    MsgBox Err.Description
-    Resume Exit_Open_table_etd_requests_solved_Clic
-    
-End Sub
-Private Sub Run_qry_find_etd_information_Click()
-On Error GoTo Err_Run_qry_find_etd_information_Click
-
-    Dim stDocName As String
-
-    stDocName = "find etd information"
-    DoCmd.RunMacro stDocName
-
-Exit_Run_qry_find_etd_information_Click:
-    Exit Sub
-
-Err_Run_qry_find_etd_information_Click:
-    MsgBox Err.Description
-    Resume Exit_Run_qry_find_etd_information_Click
-    
-End Sub
-Private Sub run_qry_ICS_requests_all_info_Click()
-On Error GoTo Err_run_qry_ICS_requests_all_info_Click
-
-    Dim stDocName As String
-
-    stDocName = "ICS Requets all Info"
-    DoCmd.RunMacro stDocName
-
-Exit_run_qry_ICS_requests_all_info_Click:
-    Exit Sub
-
-Err_run_qry_ICS_requests_all_info_Click:
-    MsgBox Err.Description
-    Resume Exit_run_qry_ICS_requests_all_info_Click
-    
-End Sub
-Private Sub run_qry_ICS_requests_to_Ams_Click()
-On Error GoTo Err_run_qry_ICS_requests_to_Ams_Click
-
-    Dim stDocName As String
-
-    stDocName = "ICS Requests to Ams"
-    DoCmd.RunMacro stDocName
-
-Exit_run_qry_ICS_requests_to_Ams_Click:
-    Exit Sub
-
-Err_run_qry_ICS_requests_to_Ams_Click:
-    MsgBox Err.Description
-    Resume Exit_run_qry_ICS_requests_to_Ams_Click
-    
-End Sub
-Private Sub run_qry_ics_requests_no_response_Click()
-On Error GoTo Err_run_qry_ics_requests_no_response_Click
-
-    Dim stDocName As String
-
-    stDocName = "ICS Requests No Response"
-    DoCmd.RunMacro stDocName
-
-Exit_run_qry_ics_requests_no_response_Cl:
-    Exit Sub
-
-Err_run_qry_ics_requests_no_response_Click:
-    MsgBox Err.Description
-    Resume Exit_run_qry_ics_requests_no_response_Cl
-    
-End Sub
-Private Sub run_qry_outstanding_etd_requests_Click()
-On Error GoTo Err_run_qry_outstanding_etd_requests_Click
-
-    Dim stDocName As String
-
-    stDocName = "Outstanding ETD Requests"
-    DoCmd.RunMacro stDocName
-
-Exit_run_qry_outstanding_etd_requests_Cl:
-    Exit Sub
-
-Err_run_qry_outstanding_etd_requests_Click:
-    MsgBox Err.Description
-    Resume Exit_run_qry_outstanding_etd_requests_Cl
-    
-End Sub
-Private Sub open_form_etd_requests_Click()
-On Error GoTo Err_open_form_etd_requests_Click
-
-    Dim stDocName As String
-    Dim stLinkCriteria As String
-
-    stDocName = "frm_ETD_Requests2"
-    DoCmd.OpenForm stDocName, , , stLinkCriteria
-
-Exit_open_form_etd_requests_Click:
-    Exit Sub
-
-Err_open_form_etd_requests_Click:
-    MsgBox Err.Description
-    Resume Exit_open_form_etd_requests_Click
-    
-End Sub
-Private Sub run_macro_delete_solved_requests_Click()
-On Error GoTo Err_run_macro_delete_solved_requests_Click
-
-    Dim stDocName As String
-
-    stDocName = "archive solved requests"
-    DoCmd.RunMacro stDocName
-
-Exit_run_macro_delete_solved_requests_Cl:
-    Exit Sub
-
-Err_run_macro_delete_solved_requests_Click:
-    MsgBox Err.Description
-    Resume Exit_run_macro_delete_solved_requests_Cl
-    
-End Sub
-Private Sub run_macro_archive_solved_etd_requests_Click()
-On Error GoTo Err_run_macro_archive_solved_etd_requests_Click
-
-    Dim stDocName As String
-
-    stDocName = "archive solved requests"
-    DoCmd.RunMacro stDocName
-
-Exit_run_macro_archive_solved_etd_reques:
-    Exit Sub
-
-Err_run_macro_archive_solved_etd_requests_Click:
-    MsgBox Err.Description
-    Resume Exit_run_macro_archive_solved_etd_reques
-    
-End Sub
-Private Sub Command26_Click()
-On Error GoTo Err_Command26_Click
-
-    Dim stDocName As String
-
-    stDocName = "delete solved requests"
-    DoCmd.RunMacro stDocName
-
-Exit_Command26_Click:
-    Exit Sub
-
-Err_Command26_Click:
-    MsgBox Err.Description
-    Resume Exit_Command26_Click
-    
-End Sub
-Private Sub Run_Macro_Delete_solved_etd_requests_Click()
-On Error GoTo Err_Run_Macro_Delete_solved_etd_requests_Click
-
-    Dim stDocName As String
-
-    stDocName = "delete solved requests"
-    DoCmd.RunMacro stDocName
-
-Exit_Run_Macro_Delete_solved_etd_request:
-    Exit Sub
-
-Err_Run_Macro_Delete_solved_etd_requests_Click:
-    MsgBox Err.Description
-    Resume Exit_Run_Macro_Delete_solved_etd_request
-    
-End Sub
-Private Sub Command29_Click()
-On Error GoTo Err_Command29_Click
-
-    Dim stDocName As String
-
-    stDocName = "MCR_Part number search"
-    DoCmd.RunMacro stDocName
-
-Exit_Command29_Click:
-    Exit Sub
-
-Err_Command29_Click:
-    MsgBox Err.Description
-    Resume Exit_Command29_Click
-    
-End Sub
-Private Sub Command70_Click()
-On Error GoTo Err_Command70_Click
-
-    Dim stDocName As String
-
-    stDocName = "Qry_AmsETDInfo"
-    DoCmd.OpenQuery stDocName, acNormal, acEdit
-
-Exit_Command70_Click:
-    Exit Sub
-
-Err_Command70_Click:
-    MsgBox Err.Description
-    Resume Exit_Command70_Click
-    
-End Sub
-Private Sub Command81_Click()
-On Error GoTo Err_Command81_Click
-
-
-    DoCmd.DoMenuItem acFormBar, acRecordsMenu, 5, , acMenuVer70
-
-Exit_Command81_Click:
-    Exit Sub
-
-Err_Command81_Click:
-    MsgBox Err.Description
-    Resume Exit_Command81_Click
-    
-End Sub
-
-Private Sub Command86_Click()
-Dim ETD As ETD_Process
-Set ETD = New ETD_Process
-
-With ETD
-    .ETD_file_name = "G:\xxNPO\VOR files\ZVOR_Search.xlsm"
-    .Query = "ZVOR_ETD_PARTs"
-End With
-
-ETD.Create_Objects
-ETD.Delete_old_content
-ETD.Export_Access_to_Excel
-
-
-End Sub
+npm error node-pre-gyp ERR! stack     at maybeClose (node:internal/child_process:1125:16)
+npm error node-pre-gyp ERR! stack     at ChildProcess._handle.onexit (node:internal/child_process:305:5)
+npm error node-pre-gyp ERR! System Windows_NT 10.0.26200
+npm error node-pre-gyp ERR! command "C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\800113527\\Downloads\\helix-app\\helix-app\\backend\\node_modules\\muhammara\\node_modules\\@mapbox\\node-pre-gyp\\bin\\node-pre-gyp" "install" "--fallback-to-build" "${EXTRA_NODE_PRE_GYP_FLAGS:-}"
+npm error node-pre-gyp ERR! cwd C:\Users\800113527\Downloads\helix-app\helix-app\backend\node_modules\muhammara
+npm error node-pre-gyp ERR! node -v v26.4.0
+npm error node-pre-gyp ERR! node-pre-gyp -v v1.0.11
+npm error node-pre-gyp ERR! not ok
+npm error A complete log of this run can be found in: C:\Users\800113527\AppData\Local\npm-cache\_logs\2026-08-10T19_13_29_635Z-debug-0.log
+PS C:\Users\800113527\Downloads\helix-app\helix-app\backend> copy .\.env.example .env
+PS C:\Users\800113527\Downloads\helix-app\helix-app\backend> node .\scripts\make-sample-data.js
+node:internal/modules/cjs/loader:1572
+  throw err;
+  ^
+
+Error: Cannot find module 'xlsx'
+Require stack:
+- C:\Users\800113527\Downloads\helix-app\helix-app\backend\scripts\make-sample-data.js
+    at Module._resolveFilename (node:internal/modules/cjs/loader:1568:15)
+    at wrapResolveFilename (node:internal/modules/cjs/loader:1122:27)
+    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1146:10)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1173:12)
+    at Module._load (node:internal/modules/cjs/loader:1345:5)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:260:19)
+    at Module.require (node:internal/modules/cjs/loader:1689:12)
+    at require (node:internal/modules/helpers:191:16)
+    at Object.<anonymous> (C:\Users\800113527\Downloads\helix-app\helix-app\backend\scripts\make-sample-data.js:10:14)
+    at Module._compile (node:internal/modules/cjs/loader:1944:14) {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [
+    'C:\\Users\\800113527\\Downloads\\helix-app\\helix-app\\backend\\scripts\\make-sample-data.js'
+  ]
+}
+
+Node.js v26.4.0
+PS C:\Users\800113527\Downloads\helix-app\helix-app\backend> npm start
+
+> helix-backend@1.0.0 start
+> node src/server.js
+
+node:internal/modules/cjs/loader:1572
+  throw err;
+  ^
+
+Error: Cannot find module 'dotenv'
+Require stack:
+- C:\Users\800113527\Downloads\helix-app\helix-app\backend\src\server.js
+    at Module._resolveFilename (node:internal/modules/cjs/loader:1568:15)
+    at wrapResolveFilename (node:internal/modules/cjs/loader:1122:27)
+    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1146:10)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1173:12)
+    at Module._load (node:internal/modules/cjs/loader:1345:5)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:260:19)
+    at Module.require (node:internal/modules/cjs/loader:1689:12)
+    at require (node:internal/modules/helpers:191:16)
+    at Object.<anonymous> (C:\Users\800113527\Downloads\helix-app\helix-app\backend\src\server.js:1:1)
+    at Module._compile (node:internal/modules/cjs/loader:1944:14) {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [
+    'C:\\Users\\800113527\\Downloads\\helix-app\\helix-app\\backend\\src\\server.js'
+  ]
+}
+
+Node.js v26.4.0
+PS C:\Users\800113527\Downloads\helix-app\helix-app\backend> 
