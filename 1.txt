@@ -1,25 +1,63 @@
-HELIX API server running at http://localhost:5001
-Error: Repository file not found:
-C:\Users\800113527\OneDrive - Nissan Motor Corporation\HELIX\Database\All Templates Repository.xlsx
-    at Object.initSession (C:\Users\800113527\Downloads\helix-app (2)\helix-app\backend\src\services\data.js:67:11)
-    at C:\Users\800113527\Downloads\helix-app (2)\helix-app\backend\src\server.js:31:18
-    at C:\Users\800113527\Downloads\helix-app (2)\helix-app\backend\src\server.js:24:52
-    at Layer.handle [as handle_request] (C:\Users\800113527\Downloads\helix-app (2)\helix-app\backend\node_modules\express\lib\router\layer.js:95:5)
-    at next (C:\Users\800113527\Downloads\helix-app (2)\helix-app\backend\node_modules\express\lib\router\route.js:149:13)
-    at Route.dispatch (C:\Users\800113527\Downloads\helix-app (2)\helix-app\backend\node_modules\express\lib\router\route.js:119:3)
-    at Layer.handle [as handle_request] (C:\Users\800113527\Downloads\helix-app (2)\helix-app\backend\node_modules\express\lib\router\layer.js:95:5)
-    at C:\Users\800113527\Downloads\helix-app (2)\helix-app\backend\node_modules\express\lib\router\index.js:284:15
-    at router.process_params (C:\Users\800113527\Downloads\helix-app (2)\helix-app\backend\node_modules\express\lib\router\index.js:346:12)
-    at next (C:\Users\800113527\Downloads\helix-app (2)\helix-app\backend\node_modules\express\lib\router\index.js:280:10)
-Error: Repository file not found:
-C:\Users\800113527\OneDrive - Nissan Motor Corporation\HELIX\Database\All Templates Repository.xlsx
-    at Object.initSession (C:\Users\800113527\Downloads\helix-app (2)\helix-app\backend\src\services\data.js:67:11)
-    at C:\Users\800113527\Downloads\helix-app (2)\helix-app\backend\src\server.js:31:18
-    at C:\Users\800113527\Downloads\helix-app (2)\helix-app\backend\src\server.js:24:52
-    at Layer.handle [as handle_request] (C:\Users\800113527\Downloads\helix-app (2)\helix-app\backend\node_modules\express\lib\router\layer.js:95:5)
-    at next (C:\Users\800113527\Downloads\helix-app (2)\helix-app\backend\node_modules\express\lib\router\route.js:149:13)
-    at Route.dispatch (C:\Users\800113527\Downloads\helix-app (2)\helix-app\backend\node_modules\express\lib\router\route.js:119:3)
-    at Layer.handle [as handle_request] (C:\Users\800113527\Downloads\helix-app (2)\helix-app\backend\node_modules\express\lib\router\layer.js:95:5)
-    at C:\Users\800113527\Downloads\helix-app (2)\helix-app\backend\node_modules\express\lib\router\index.js:284:15
-    at router.process_params (C:\Users\800113527\Downloads\helix-app (2)\helix-app\backend\node_modules\express\lib\router\index.js:346:12)
-    at next (C:\Users\800113527\Downloads\helix-app (2)\helix-app\backend\node_modules\express\lib\router\index.js:280:10)
+from fastapi import FastAPI
+from pydantic import BaseModel, Field
+
+from calculator import PriceInputs, PriceResult, calculate_new_price
+
+app = FastAPI(
+    title="Aluminium Price Calculator",
+    description="Calculates the new aluminium price based on LME, PPI, and CNG benchmarks.",
+    version="1.0.0",
+)
+
+
+class PriceRequest(BaseModel):
+    weight: float = Field(..., description="Part weight (PWt)", example=3.6)
+    current_price: float = Field(..., alias="current_price", description="Current price (P_Current)", example=47.09)
+    ppi_q: float = Field(..., description="PPI for current quarter", example=281.07)
+    ppi_q1: float = Field(..., description="PPI for previous quarter (PPI_Q-1)", example=263.8)
+    drauss_factor: float = Field(1.44, description="Drauss / conversion factor (DF_c) — defaults to 1.44", example=1.44)
+    mc_q: float = Field(..., description="Metal cost current quarter (MC_Q)", example=3.26)
+    mc_q_1: float = Field(..., description="Metal cost previous quarter (MC_Q-1)", example=2.90)
+    cng_q: float = Field(..., description="CNG cost current quarter", example=0.97)
+    cng_q_1: float = Field(..., description="CNG cost previous quarter (CNG_Q-1)", example=0.72)
+
+    model_config = {"populate_by_name": True}
+
+
+class PriceResponse(BaseModel):
+    new_price: float = Field(..., description="Calculated new price (P_New)")
+    ams_q: float = Field(..., description="Alloy metal surcharge current quarter")
+    ams_q_1: float = Field(..., description="Alloy metal surcharge previous quarter")
+    ppi_factor: float = Field(..., description="PPI adjustment factor")
+
+
+@app.post("/calculate-price", response_model=PriceResponse)
+def calculate_price(request: PriceRequest) -> PriceResponse:
+    """
+    Calculate the new aluminium part price using the formula:
+
+        AMS_Q      = (MC_Q  × DF_c) + CNG_Q
+        AMS_Q-1    = (MC_Q-1 × DF_c) + CNG_Q-1
+        PPI_Factor = (PPI_Q − PPI_Q-1) / PPI_Q-1
+        P_New      = P_Current + [(AMS_Q − AMS_Q-1) × PWt] + (PPI_Factor × P_Current)
+    """
+    inputs = PriceInputs(
+        weight=request.weight,
+        current_price=request.current_price,
+        ppi_q=request.ppi_q,
+        ppi_q1=request.ppi_q1,
+        drauss_factor=request.drauss_factor,
+        mc_q=request.mc_q,
+        mc_q_1=request.mc_q_1,
+        cng_q=request.cng_q,
+        cng_q_1=request.cng_q_1,
+    )
+
+    result: PriceResult = calculate_new_price(inputs)
+
+    return PriceResponse(
+        new_price=result.new_price,
+        ams_q=result.ams_q,
+        ams_q_1=result.ams_q_1,
+        ppi_factor=result.ppi_factor,
+    )
