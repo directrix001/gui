@@ -1,223 +1,2508 @@
-Option Compare Database
+import tkinter as tk
+from tkinter import filedialog, messagebox
+from openpyxl import load_workbook
+from datetime import datetime, timedelta
 
-Private Sub Claim_SUv2_AfterUpdate()
-    '"Stock";"Urgent";"Stock And Ugent"
-    If Me.Claim_SUv2.Value = "Stock" Then
-        Me.txtClaim_SU.Value = "S%"
-    ElseIf Me.Claim_SUv2.Value = "VOR" Then
-        Me.txtClaim_SU.Value = "V%"
-    Else
-        Me.txtClaim_SU.Value = "%"
-    End If
-End Sub
+# Hide main window
+root = tk.Tk()
+root.withdraw()
 
+answer = messagebox.askyesno("Confirmation", "Do you want to browse an Excel file?")
 
-Private Sub cmdGenReport_Click()
-    Set_Filters
-    'Display Report
-    If IsNull(Me.txtClaim_PickerFullName) And IsNull(Me.Team_ID) Then
-        DoCmd.OpenReport "rptNisC_PickerClaimReport_Sum", acViewPreview
-    Else
-        DoCmd.OpenReport "rptNisC_PickerClaimReport_Sum_ByPicker", acViewPreview
-    End If
-    
-End Sub
+if answer:
 
-Private Sub Set_Filters()
-      
-    Dim cnnSP_SQL As ADODB.Connection
-    Dim cmdSP_SQL As ADODB.Command
-    Dim parmSP_SQL As ADODB.Parameter
-    Dim rsSource As ADODB.Recordset
-    Dim rsData As ADODB.Recordset
-    Dim strUserName As String
-    
-    GetWindowsUserName strUserName
-    Form_frm_PU_FRA_ReportsN.txtUserName.Value = strUserName
-    
-    Set cnnSP_SQL = CurrentProject.Connection
-    Set cmdSP_SQL = New ADODB.Command
-    
-    cmdSP_SQL.ActiveConnection = cnnSP_SQL
-    cmdSP_SQL.CommandType = adCmdStoredProc
-    cmdSP_SQL.CommandText = "qryNisC_PickerClaimFilters"
-    
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtUserName", adVarChar, adParamInput, 50, strUserName)
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    
-    Set rsData = cmdSP_SQL.Execute
-    
-    If rsData.RecordCount > 0 Then
-    
-        Set cmdSP_SQL = Nothing
-        Set cmdSP_SQL = New ADODB.Command
-        
-        cmdSP_SQL.ActiveConnection = cnnSP_SQL
-        cmdSP_SQL.CommandType = adCmdStoredProc
-        cmdSP_SQL.CommandText = "qryNisC_PickerClaimFiltersReset"
-        cmdSP_SQL.CommandTimeout = 1000
-        
-        Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtUserName", adVarChar, adParamInput, 50, strUserName)
-        cmdSP_SQL.Parameters.Append parmSP_SQL
-        
-        cmdSP_SQL.Execute
-        
-    End If
-    
-    'Set Criteria Filter
-    Set cmdSP_SQL = Nothing
-    Set cmdSP_SQL = New ADODB.Command
-    
-    cmdSP_SQL.ActiveConnection = cnnSP_SQL
-    cmdSP_SQL.CommandType = adCmdStoredProc
-    cmdSP_SQL.CommandText = "qryNisC_PickerClaimFiltersSet"
-    cmdSP_SQL.CommandTimeout = 1000
-        
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtUserName", adVarChar, adParamInput, 50, strUserName)
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtDate_Start", adDate, adParamInput, , Me.txtDate_Start.Value)
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtDate_End", adDate, adParamInput, , Me.txtDate_End.Value)
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtSU", adVarChar, adParamInput, 50, Me.txtClaim_SU.Value)
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtSU_01", adVarChar, adParamInput, 50, Me.txtClaim_SU_01.Value)
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtSU_02", adVarChar, adParamInput, 50, Me.txtClaim_SU_02.Value)
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtSU_03", adVarChar, adParamInput, 50, Me.txtClaim_SU_03.Value)
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtSU_04", adVarChar, adParamInput, 50, Me.txtClaim_SU_04.Value)
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtDealerNo", adVarChar, adParamInput, 50, Me.txtClaim_DealerAccNo.Value & "%")
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtPartNo", adVarChar, adParamInput, 50, Me.txtClaim_PartNumber.Value & "%")
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtPickerName", adVarChar, adParamInput, 50, Me.txtClaim_PickerFullName.Value)
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneA", adVarChar, adParamInput, 50, IIf(Me.txtZoneA.Value = 0, "-", "A"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneB", adVarChar, adParamInput, 50, IIf(Me.txtZoneB.Value = 0, "-", "B"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneC", adVarChar, adParamInput, 50, IIf(Me.txtZoneC.Value = 0, "-", "C"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneD", adVarChar, adParamInput, 50, IIf(Me.txtZoneD.Value = 0, "-", "D"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneE", adVarChar, adParamInput, 50, IIf(Me.txtZoneE.Value = 0, "-", "E"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneF", adVarChar, adParamInput, 50, IIf(Me.txtZoneF.Value = 0, "-", "F"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneG", adVarChar, adParamInput, 50, IIf(Me.txtZoneG.Value = 0, "-", "G"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneH", adVarChar, adParamInput, 50, IIf(Me.txtZoneG.Value = 0, "-", "H"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneI", adVarChar, adParamInput, 50, IIf(Me.txtZoneI.Value = 0, "-", "I"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneJ", adVarChar, adParamInput, 50, IIf(Me.txtZoneJ.Value = 0, "-", "J"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneK", adVarChar, adParamInput, 50, IIf(Me.txtZoneK.Value = 0, "-", "K"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneL", adVarChar, adParamInput, 50, IIf(Me.txtZoneL.Value = 0, "-", "L"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneM", adVarChar, adParamInput, 50, IIf(Me.txtZoneM.Value = 0, "-", "M"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneN", adVarChar, adParamInput, 50, IIf(Me.txtZoneN.Value = 0, "-", "N"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneO", adVarChar, adParamInput, 50, IIf(Me.txtZoneO.Value = 0, "-", "O"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneP", adVarChar, adParamInput, 50, IIf(Me.txtZoneP.Value = 0, "-", "P"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneQ", adVarChar, adParamInput, 50, IIf(Me.txtZoneQ.Value = 0, "-", "Q"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneR", adVarChar, adParamInput, 50, IIf(Me.txtZoneR.Value = 0, "-", "R"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneS", adVarChar, adParamInput, 50, IIf(Me.txtZoneS.Value = 0, "-", "S"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneT", adVarChar, adParamInput, 50, IIf(Me.txtZoneT.Value = 0, "-", "T"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneU", adVarChar, adParamInput, 50, IIf(Me.txtZoneU.Value = 0, "-", "U"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneV", adVarChar, adParamInput, 50, IIf(Me.txtZoneV.Value = 0, "-", "V"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneW", adVarChar, adParamInput, 50, IIf(Me.txtZoneW.Value = 0, "-", "W"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneX", adVarChar, adParamInput, 50, IIf(Me.txtZoneX.Value = 0, "-", "X"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneY", adVarChar, adParamInput, 50, IIf(Me.txtZoneY.Value = 0, "-", "Y"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtZoneZ", adVarChar, adParamInput, 50, IIf(Me.txtZoneZ.Value = 0, "-", "Z"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC10", adVarChar, adParamInput, 50, IIf(Me.txtCC10.Value = 0, "0", "10"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC11", adVarChar, adParamInput, 50, IIf(Me.txtCC11.Value = 0, "0", "11"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC12", adVarChar, adParamInput, 50, IIf(Me.txtCC12.Value = 0, "0", "12"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC21", adVarChar, adParamInput, 50, IIf(Me.txtCC21.Value = 0, "0", "21"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC22", adVarChar, adParamInput, 50, IIf(Me.txtCC22.Value = 0, "0", "22"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC30", adVarChar, adParamInput, 50, IIf(Me.txtCC30.Value = 0, "0", "30"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC40", adVarChar, adParamInput, 50, IIf(Me.txtCC40.Value = 0, "0", "40"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC41", adVarChar, adParamInput, 50, IIf(Me.txtCC41.Value = 0, "0", "41"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC45", adVarChar, adParamInput, 50, IIf(Me.txtCC45.Value = 0, "0", "45"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC46", adVarChar, adParamInput, 50, IIf(Me.txtCC46.Value = 0, "0", "46"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC50", adVarChar, adParamInput, 50, IIf(Me.txtCC50.Value = 0, "0", "50"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC55", adVarChar, adParamInput, 50, IIf(Me.txtCC55.Value = 0, "0", "55"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC60", adVarChar, adParamInput, 50, IIf(Me.txtCC60.Value = 0, "0", "60"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC61", adVarChar, adParamInput, 50, IIf(Me.txtCC61.Value = 0, "0", "61"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC62", adVarChar, adParamInput, 50, IIf(Me.txtCC62.Value = 0, "0", "62"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC65", adVarChar, adParamInput, 50, IIf(Me.txtCC65.Value = 0, "0", "65"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtCC70", adVarChar, adParamInput, 50, IIf(Me.txtCC70.Value = 0, "0", "70"))
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    Set parmSP_SQL = cmdSP_SQL.CreateParameter("txtTeam_ID", adVarChar, adParamInput, 50, Me.Team_ID.Value)
-    cmdSP_SQL.Parameters.Append parmSP_SQL
-    cmdSP_SQL.Execute
-    
-End Sub
+    file_path = filedialog.askopenfilename(
+        title="Select Excel file",
+        filetypes=[("Excel files", "*.xlsx")]
+    )
 
-Private Sub cmdGenReport_Detailed_Click()
-    Set_Filters
-    'Display Report
-    If IsNull(Me.txtClaim_PickerFullName) And IsNull(Me.Team_ID) Then
-        DoCmd.OpenReport "rptNisC_PickerClaimReport_Detailed", acViewPreview
-    Else
-        DoCmd.OpenReport "rptNisC_PickerClaimReport_Detailed_ByPicker", acViewPreview
-    End If
-End Sub
+    if file_path:
+        print("File selected:", file_path)
 
-Private Sub cmdZone_All_Click()
-    Me.txtRegion_A.Value = True
-    Me.txtRegion_B.Value = True
-    Me.txtRegion_C.Value = True
-    Me.txtRegion_D.Value = True
-    Me.txtRegion_E.Value = True
-    Me.txtRegion_F.Value = True
-End Sub
+        # IMPORTANT: removed data_only for proper save
+        wb = load_workbook(file_path)
 
-Private Sub cmdZone_Clear_Click()
-    Me.txtRegion_A.Value = False
-    Me.txtRegion_B.Value = False
-    Me.txtRegion_C.Value = False
-    Me.txtRegion_D.Value = False
-    Me.txtRegion_E.Value = False
-    Me.txtRegion_F.Value = False
-End Sub
+        ws_calc = wb["Calculations"]
+        ws_pay = wb["ExcelPaySlip"]
+        ws_ta = wb["T&A"]
+
+        # ---------------- BASIC ----------------
+        ws_calc["I5"] = ws_pay["A2"].value
+        ws_calc["I6"] = ws_pay["B3"].value
+
+        raw_text = ws_pay["A11"].value
+        if raw_text and "X" in str(raw_text):
+            ws_calc["J3"] = str(raw_text).split("X")[1].replace(")", "").strip()
+        else:
+            ws_calc["J3"] = 0
+
+        # Working days
+        date_value = ws_calc["I4"].value
+        working_days = 0
+
+        if isinstance(date_value, datetime):
+            d = date_value.replace(day=1)
+            while d <= date_value:
+                if d.weekday() < 5:
+                    working_days += 1
+                d += timedelta(days=1)
+
+        # Entity
+        entity = str(ws_pay["A4"].value).upper()
+
+        if any(x in entity for x in ["NMUK", "NTCE", "NITCO", "NMPC"]):
+            factor = 7.8
+        elif "NMGB" in entity or "NDE" in entity:
+            factor = 7.5
+        else:
+            factor = 0
+
+        try:
+            j3 = float(ws_calc["J3"].value)
+        except:
+            j3 = 0
+
+        ws_calc["J4"] = round(j3 * factor * working_days, 2)
+
+        # ---------------- OVERTIME LOGIC ----------------
+
+        print("\n--- OVERTIME CALCULATIONS START ---")
+
+        x10_total = 0
+        x15_total = 0
+        x20_total = 0
+
+        for row in range(3, ws_ta.max_row + 1):
+
+            time_val = ws_ta.cell(row=row, column=4).value
+            qty_val = ws_ta.cell(row=row, column=5).value
+
+            if time_val and qty_val:
+
+                clean_time = " ".join(str(time_val).split()).upper()
+
+                try:
+                    num = float(str(qty_val).replace(",", "").strip())
+                except:
+                    continue
+
+                if "OVERTIME X1.0" in clean_time:
+                    x10_total += num
+                elif "OVERTIME X1.5" in clean_time:
+                    x15_total += num
+                elif "OVERTIME X2.0" in clean_time:
+                    x20_total += num
+
+        # Round base sums
+        x10_total = round(x10_total, 2)
+        x15_total = round(x15_total, 2)
+        x20_total = round(x20_total, 2)
+
+        # J6, J7, J8 calculation
+        j6_final = round(x10_total + (j3 * x10_total * 1.0), 2)
+        j7_final = round(x15_total + (j3 * x15_total * 1.5), 2)
+        j8_final = round(x20_total + (j3 * x20_total * 2.0), 2)
+
+        ws_calc["J6"] = j6_final
+        ws_calc["J7"] = j7_final
+        ws_calc["J8"] = j8_final
+
+        print("\n OVERTIME VALUES:")
+        print("J6:", j6_final)
+        print("J7:", j7_final)
+        print("J8:", j8_final)
+
+        # ---------------- SHIFT BASED CALCULATION ----------------
+
+print("\n--- SHIFT BASED CALCULATION START ---")
+
+late_sum = 0
+night_sum = 0
+early_sum = 0
+
+for row in range(3, ws_ta.max_row + 1):
+
+    time_val = ws_ta.cell(row=row, column=4).value   # D
+    qty_val = ws_ta.cell(row=row, column=5).value    # E
+    tag_val = ws_ta.cell(row=row, column=7).value    # G
+
+    if time_val and qty_val and tag_val:
+
+        # normalize
+        clean_time = " ".join(str(time_val).split()).upper()
+        clean_tag = " ".join(str(tag_val).split()).upper()
+
+        # COMMON CONDITION (IMPORTANT FIX)
+        if clean_time == "UK - OVERTIME X1.5":
+
+            try:
+                num = float(str(qty_val).replace(",", "").strip())
+            except:
+                continue
+
+            # Split by tag
+            if clean_tag == "LATE SHIFT OVERTIME 1.5X":
+                late_sum += num
+
+            elif clean_tag == "NIGHT SHIFT OVERTIME 1.5X":
+                night_sum += num
+
+            elif clean_tag == "EARLY SHIFT OVERTIME 1.5X":
+                early_sum += num
+
+                # ----------------FINAL CORRECT FORMULA ----------------
+
+                j9_final = round(late_sum * (j3 * 0.20), 2) if late_sum else 0
+                j10_final = round(night_sum * (j3 * 0.3333), 2) if night_sum else 0
+                j11_final = round(early_sum * (j3 * 0.1333), 2) if early_sum else 0
+
+                # Write to Excel
+                ws_calc["J9"] = j9_final
+                ws_calc["J10"] = j10_final
+                ws_calc["J11"] = j11_final
+
+                print("\nFINAL SHIFT VALUES:")
+                print("J9 (Late):", j9_final)
+                print("J10 (Night):", j10_final)
+                print("J11 (Early):", j11_final)
+
+# ---------------- DAY TO EARLY CALCULATION ----------------
+
+                print("\n--- DAY TO EARLY CALCULATION ---")
+
+                day_to_early_sum = 0
+
+                for row in range(3, ws_ta.max_row + 1):
+
+                    time_val = ws_ta.cell(row=row, column=4).value   # D
+                    date_val = ws_ta.cell(row=row, column=3).value   # C
+                    qty_val = ws_ta.cell(row=row, column=5).value    # E
+                    tag_val = ws_ta.cell(row=row, column=7).value    # G
+
+                    # Condition 1 → Column D blank
+                    if time_val is None or str(time_val).strip() == "":
+
+                        try:
+                            # Condition 2 → Weekdays only
+                            if date_val and date_val.weekday() < 5:
+
+                                if tag_val and qty_val:
+
+                                    clean_tag = " ".join(str(tag_val).split()).upper()
+
+                                    # FIXED CONDITION
+                                    if "DAY TO EARLY" in clean_tag:
+
+                                        num = float(str(qty_val).replace(",", "").strip())
+                                        day_to_early_sum += num
+                                        print(f"Row {row} added → {num}")
+
+                        except:
+                            pass
+
+                #Final result
+                day_to_early_sum = round(day_to_early_sum, 2)
+
+                ws_calc["J12"] = day_to_early_sum
+
+                print("Final Day to Early (J12):", day_to_early_sum)
 
 
 
+                # ----------------DAY TO LATE → J13 ----------------
 
-Private Sub txtDate_Start_Click()
+                print("\n--- DAY TO LATE (J13) CALCULATION ---")
 
-End Sub
+                day_to_late_sum = 0
+
+                for row in range(3, ws_ta.max_row + 1):
+
+                    time_val = ws_ta.cell(row=row, column=4).value   # Column D
+                    date_val = ws_ta.cell(row=row, column=3).value   # Column C
+                    qty_val = ws_ta.cell(row=row, column=5).value    # Column E
+                    tag_val = ws_ta.cell(row=row, column=7).value    # Column G
+
+                    # Condition 1 → Time Entry Code blank
+                    if time_val is None or str(time_val).strip() == "":
+
+                        try:
+                            # Condition 2 → Weekdays only
+                            if date_val and date_val.weekday() < 5:
+
+                                #  Condition 3 → Tag contains "Day to Late"
+                                if tag_val and qty_val:
+
+                                    clean_tag = " ".join(str(tag_val).split()).upper()
+
+                                    if "DAY TO LATE" in clean_tag:
+
+                                        num = float(str(qty_val).replace(",", "").strip())
+                                        day_to_late_sum += num
+                                        print(f"Row {row} added → {num}")
+
+                        except:
+                            pass
+
+                # Final result
+                day_to_late_sum = round(day_to_late_sum, 2)
+
+                # Write to J13
+                ws_calc["J13"] = day_to_late_sum
+
+                print("Final Day to Late (J13):", day_to_late_sum)
+
+
+
+                # ---------------- DAY TO NIGHT → J14 ----------------
+
+                print("\n--- DAY TO NIGHT (J14) CALCULATION ---")
+
+                day_to_night_sum = 0
+
+                for row in range(3, ws_ta.max_row + 1):
+
+                    time_val = ws_ta.cell(row=row, column=4).value   # Column D
+                    date_val = ws_ta.cell(row=row, column=3).value   # Column C
+                    qty_val = ws_ta.cell(row=row, column=5).value    # Column E
+                    tag_val = ws_ta.cell(row=row, column=7).value    # Column G
+
+                    # Condition 1 → Time Entry Code blank
+                    if time_val is None or str(time_val).strip() == "":
+
+                        try:
+                            # Condition 2 → Weekdays only
+                            if date_val and date_val.weekday() < 5:
+
+                                # Condition 3 → Tag contains "Day to Night"
+                                if tag_val and qty_val:
+
+                                    clean_tag = " ".join(str(tag_val).split()).upper()
+
+                                    if "DAY TO NIGHT" in clean_tag:
+
+                                        num = float(str(qty_val).replace(",", "").strip())
+                                        day_to_night_sum += num
+                                        print(f"Row {row} added → {num}")
+
+                        except:
+                            pass
+
+                # Final result
+                day_to_night_sum = round(day_to_night_sum, 2)
+
+                # Write to J14
+                ws_calc["J14"] = day_to_night_sum
+
+                print("Final Day to Night (J14):", day_to_night_sum)
+
+
+                # ---------------- SHIFT DL VALUE SET ----------------
+
+
+            # ==========================================================
+            # ✅ SHIFT TYPE DETECTION (COMMON FOR BOTH)
+            # ==========================================================
+
+            print("\n--- SHIFT TYPE DETECTION ---")
+
+            shift_type = None
+
+            for row in ws_pay.iter_rows(values_only=True):
+                for cell in row:
+                    if cell:
+                        text = str(cell).upper()
+                        if "SHIFT DL" in text or "SH DL" in text:
+                            shift_type = "DL"
+                            break
+                        elif "SHIFT DF" in text or "SH DF" in text:
+                            shift_type = "DF"
+                            break
+                        elif "SHIFT MF" in text or "SH MF" in text:
+                            shift_type = "MF"
+                            break
+                if shift_type:
+                    break
+
+            print("Detected Shift Type:", shift_type)
+
+
+            # ==========================================================
+            # ✅ PAID RULES + SUM (J22)
+            # ==========================================================
+
+            total_paid_sum = 0
+
+            if shift_type:
+
+                print("\n--- APPLYING PAID SHIFT RULES ---")
+
+                for row in range(3, ws_ta.max_row + 1):
+
+                    tag_val = ws_ta.cell(row=row, column=7).value
+                    date_val = ws_ta.cell(row=row, column=3).value
+
+                    if tag_val and date_val:
+
+                        clean_tag = " ".join(str(tag_val).split()).upper()
+
+                        try:
+                            weekday = date_val.weekday()
+
+                            # ===== DL / DF =====
+                            if shift_type in ["DL", "DF"]:
+
+                                if "ABSENCE (PAID)" in clean_tag and "LATE SHIFT" in clean_tag:
+
+                                    if shift_type == "DL":
+                                        if weekday <= 3:
+                                            value = 1.58
+                                        elif weekday == 4:
+                                            value = 1.49
+                                        else:
+                                            value = 0
+
+                                    elif shift_type == "DF":
+                                        if weekday <= 3:
+                                            value = 1.48
+                                        elif weekday == 4:
+                                            value = 1.45
+                                        else:
+                                            value = 0
+
+                                elif "ABSENCE (PAID)" in clean_tag and "NIGHT SHIFT" in clean_tag:
+
+                                    if shift_type == "DF":
+                                        if weekday <= 3:
+                                            value = 2.47
+                                        elif weekday == 6:
+                                            value = 3.19
+                                        else:
+                                            value = 0
+                                    else:
+                                        value = 0
+                                else:
+                                    continue
+
+                            # ===== MF =====
+                            elif shift_type == "MF":
+
+                                if "ABSENCE (PAID)" in clean_tag and "DAY SHIFT" in clean_tag:
+
+                                    if weekday == 5:
+                                        value = 4.58
+                                    elif weekday == 6:
+                                        value = 11.83
+                                    else:
+                                        value = 0
+
+                                elif "ABSENCE (PAID)" in clean_tag and "NIGHT SHIFT" in clean_tag:
+
+                                    if weekday <= 3:
+                                        value = 3.94
+                                    elif weekday == 4:
+                                        value = 9.86
+                                    elif weekday == 5:
+                                        value = 12.89
+                                    elif weekday == 6:
+                                        value = 3.94
+                                    else:
+                                        value = 0
+                                else:
+                                    continue
+                            else:
+                                continue
+
+                            # ✅ Write & Sum
+                            ws_ta.cell(row=row, column=6).value = value
+                            total_paid_sum += value
+
+                            print(f"[PAID] Row {row} → {value}")
+
+                        except:
+                            print(f"[PAID] Row {row} skipped")
+
+            # ✅ FINAL PAID TOTAL
+            total_paid_sum = round(total_paid_sum, 2)
+            ws_calc["J22"] = total_paid_sum
+
+            print("\n✅ TOTAL PAID (J22):", total_paid_sum)
+
+
+            # ==========================================================
+            # ✅ UNPAID RULES + SUM (J23)
+            # ==========================================================
+
+            total_unpaid_sum = 0
+
+            if shift_type:
+
+                print("\n--- APPLYING UNPAID SHIFT RULES ---")
+
+                for row in range(3, ws_ta.max_row + 1):
+
+                    tag_val = ws_ta.cell(row=row, column=7).value
+                    date_val = ws_ta.cell(row=row, column=3).value
+
+                    if tag_val and date_val:
+
+                        clean_tag = " ".join(str(tag_val).split()).upper()
+
+                        try:
+                            weekday = date_val.weekday()
+
+                            # ===== DL =====
+                            if shift_type == "DL":
+
+                                if "ABSENCE (UNPAID)" in clean_tag and "LATE SHIFT" in clean_tag:
+                                    if weekday <= 3:
+                                        value = 9.46
+                                    elif weekday == 4:
+                                        value = 8.96
+                                    else:
+                                        value = 0
+
+                                elif "ABSENCE (UNPAID)" in clean_tag and "DAY SHIFT" in clean_tag:
+                                    if weekday == 4:
+                                        value = 7.88
+                                    else:
+                                        value = 0
+                                else:
+                                    continue
+
+                            # ===== DF =====
+                            elif shift_type == "DF":
+
+                                if "ABSENCE (UNPAID)" in clean_tag and "LATE SHIFT" in clean_tag:
+                                    if weekday <= 3:
+                                        value = 8.9
+                                    elif weekday == 4:
+                                        value = 8.7
+                                    else:
+                                        value = 0
+
+                                elif "ABSENCE (UNPAID)" in clean_tag and "NIGHT SHIFT" in clean_tag:
+                                    if weekday <= 3:
+                                        value = 9.89
+                                    elif weekday == 6:
+                                        value = 12.77
+                                    else:
+                                        value = 0
+                                else:
+                                    continue
+
+                            # ===== MF =====
+                            elif shift_type == "MF":
+
+                                if "ABSENCE (UNPAID)" in clean_tag and "DAY SHIFT" in clean_tag:
+                                    if weekday <= 4:
+                                        value = 11.83
+                                    elif weekday == 5:
+                                        value = 14.25
+                                    elif weekday == 6:
+                                        value = 23.86
+                                    else:
+                                        value = 0
+
+                                elif "ABSENCE (UNPAID)" in clean_tag and "NIGHT SHIFT" in clean_tag:
+                                    if weekday <= 3:
+                                        value = 15.77
+                                    elif weekday == 4:
+                                        value = 21.69
+                                    elif weekday == 5:
+                                        value = 22.56
+                                    elif weekday == 6:
+                                        value = 15.77
+                                    else:
+                                        value = 0
+                                else:
+                                    continue
+                            else:
+                                continue
+
+                            # ✅ Write & Sum
+                            ws_ta.cell(row=row, column=6).value = value
+                            total_unpaid_sum += value
+
+                            print(f"[UNPAID] Row {row} → {value}")
+
+                        except:
+                            print(f"[UNPAID] Row {row} skipped")
+
+            # FINAL UNPAID TOTAL
+            total_unpaid_sum = round(total_unpaid_sum, 2)
+            ws_calc["J23"] = total_unpaid_sum
+
+            print("\nTOTAL UNPAID (J23):", total_unpaid_sum)
+
+
+        # ---------------- ABSENCE COUNT CALCULATION (J25) ----------------
+
+        print("\n--- ABSENCE COUNT CALCULATION (J25) ---")
+
+        total_count = 0
+
+        for row in range(3, ws_ta.max_row + 1):
+
+            status_val = ws_ta.cell(row=row, column=8).value   #  Column H
+            tag_val = ws_ta.cell(row=row, column=7).value      # Column G
+            date_val = ws_ta.cell(row=row, column=3).value     # Column C
+
+            if status_val and tag_val and date_val:
+
+                clean_status = str(status_val).strip().upper()
+                clean_tag = " ".join(str(tag_val).split()).upper()
+
+                try:
+                    if (
+                        clean_status == "APPROVED"
+                        and "ABSENCE" in clean_tag
+                        and date_val.weekday() < 5   # ✅ Mon–Fri
+                    ):
+                        total_count += 1
+                        print(f"Row {row} counted")
+
+                except:
+                    print(f"Row {row} skipped")
+
+        # ---------------- APPLY FORMULA ----------------
+
+        print("\nTotal matched rows:", total_count)
+
+        if total_count > 3:
+            remaining_count = total_count - 3
+        else:
+            remaining_count = 0
+
+        print("After excluding first 3:", remaining_count)
+
+        final_value = round((118.75 / 5) * remaining_count, 2)
+
+        # Write to J25
+        ws_calc["J25"] = final_value
+
+        print("Final value written to J25:", final_value)
+
+
+
+        # ----------------DEPUTISING CALCULATION ----------------
+
+        print("\n--- DEPUTISING CALCULATION START ---")
+
+        deputising_number = 0
+
+        # Step 1: Find "Deputising" in ExcelPaySlip column A
+        for row in ws_pay.iter_rows(min_row=1, max_col=2):  # Only A & B
+            cell_a = row[0].value   # Column A
+            cell_b = row[1].value   # Column B
+
+            if cell_a:
+                text = str(cell_a).upper()
+
+                if "DEPUTISING" in text:
+                    try:
+                        deputising_number = float(cell_b)
+                    except:
+                        deputising_number = 0
+
+                    print(f"Found Deputising: {deputising_number}")
+                    break
+
+        # Step 2: Count working days from 1st of month to I4 date
+        date_val = ws_calc["I4"].value
+
+        working_days = 0
+
+        if isinstance(date_val, datetime):
+
+            start_date = date_val.replace(day=1)
+            current_date = start_date
+
+            while current_date <= date_val:
+
+                if current_date.weekday() < 5:   #  Mon–Fri
+                    working_days += 1
+
+                current_date += timedelta(days=1)
+
+        print("Working Days:", working_days)
+
+        # Step 3: Apply formula
+        try:
+            final_value = round((deputising_number * 12 / 260) * working_days, 2)
+        except:
+            final_value = 0
+
+        # Step 4: Write to J17
+        ws_calc["J17"] = final_value
+
+        print("Final Deputising Value (J17):", final_value)
+
+
+        # ---------------- ✅ PILON CALCULATION ----------------
+
+        print("\n--- PILON CALCULATION ---")
+
+        # =====================================================
+        # STEP 1 - GET WEEKS FROM LEAVER FORM D18
+        # =====================================================
+
+        week_number = 0
+
+        d18_value = wb["Leaver Form"]["D18"].value
+
+        if d18_value:
+            try:
+                week_number = float(str(d18_value).split()[0])
+            except:
+                week_number = 0
+
+        weekdays = week_number * 5
+
+        print("Weeks:", week_number)
+        print("Weekdays:", weekdays)
+
+        # =====================================================
+        # STEP 2 - GET PAYGROUP FACTOR
+        # =====================================================
+
+        paygroup_text = str(ws_pay["A4"].value).upper()
+
+        if any(x in paygroup_text for x in ["NMUK", "NTCE", "NITCO", "NMPC"]):
+            pay_factor = 7.8
+
+        elif any(x in paygroup_text for x in ["NMGB", "NDE"]):
+            pay_factor = 7.5
+
+        else:
+            pay_factor = 0
+
+        print("Pay Factor:", pay_factor)
+
+        # =====================================================
+        # STEP 3 - GET C3
+        # =====================================================
+
+        try:
+            c3_value = float(ws_calc["C3"].value)
+        except:
+            c3_value = 0
+
+        print("C3:", c3_value)
+
+        # =====================================================
+        # STEP 4 - PILON CALCULATION
+        # =====================================================
+
+        pilon = round(
+            weekdays * pay_factor * c3_value,
+            2
+        )
+
+        print("PILON:", pilon)
+
+        # =====================================================
+        # STEP 5 - CHECK D19
+        # =====================================================
+
+        d19_value = str(
+            wb["Leaver Form"]["D19"].value
+        ).strip().upper()
+
+        shift_percent = 0
+
+        if d19_value == "YES":
+
+            # Search shift in ExcelPaySlip Column A
+
+            for row in range(1, ws_pay.max_row + 1):
+
+                cell_value = ws_pay.cell(row=row, column=1).value
+
+                if cell_value:
+
+                    text = str(cell_value).upper()
+
+                    if "SHIFT DL" in text:
+                        shift_percent = 12
+                        break
+
+                    elif "SHIFT DF" in text:
+                        shift_percent = 22
+                        break
+
+                    elif "SHIFT DT" in text:
+                        shift_percent = 22
+                        break
+
+                    elif "SHIFT MF" in text:
+                        shift_percent = 38
+                        break
+
+                    elif "SHIFT RT" in text:
+                        shift_percent = 38
+                        break
+
+        # =====================================================
+        # STEP 6 - FINAL CALCULATION
+        # =====================================================
+
+        if d19_value == "YES":
+
+            final_value = round(
+                pilon + (pilon * shift_percent / 100),
+                2
+            )
+
+        else:
+
+            final_value = pilon
+
+        # =====================================================
+        # STEP 7 - WRITE TO C20
+        # =====================================================
+
+        ws_calc["C20"] = final_value
+
+        print("Shift %:", shift_percent)
+        print("Final PILON Value:", final_value)
+
+
+        # ----------------  LIEU CALCULATION ----------------
+
+        print("\n--- LIEU CALCULATION ---")
+
+        d18_value = str(
+            wb["Leaver Form"]["D18"].value
+        ).strip().upper()
+
+        d19_value = str(
+            wb["Leaver Form"]["D19"].value
+        ).strip().upper()
+
+        # Default
+        lieu_value = 0
+
+        # =====================================================
+        # CHECK D18 = MONTH
+        # =====================================================
+
+        if "MONTH" in d18_value:
+
+            try:
+                lieu_value = float(ws_calc["C4"].value)
+            except:
+                lieu_value = 0
+
+            print("LIEU Value:", lieu_value)
+
+            shift_percent = 0
+
+            # =================================================
+            # CHECK D19 = YES
+            # =================================================
+
+            if d19_value == "YES":
+
+                # Search shift in ExcelPaySlip column A
+
+                for row in range(1, ws_pay.max_row + 1):
+
+                    cell_value = ws_pay.cell(row=row, column=1).value
+
+                    if cell_value:
+
+                        text = str(cell_value).upper()
+
+                        if "SHIFT DL" in text:
+                            shift_percent = 12
+                            break
+
+                        elif "SHIFT DF" in text:
+                            shift_percent = 22
+                            break
+
+                        elif "SHIFT DT" in text:
+                            shift_percent = 22
+                            break
+
+                        elif "SHIFT MF" in text:
+                            shift_percent = 38
+                            break
+
+                        elif "SHIFT RT" in text:
+                            shift_percent = 38
+                            break
+
+                final_value = round(
+                    lieu_value + (lieu_value * shift_percent / 100),
+                    2
+                )
+
+            else:
+                final_value = lieu_value
+
+            # =================================================
+            # WRITE RESULT
+            # =================================================
+
+            ws_calc["C21"] = final_value
+
+            print("Shift %:", shift_percent)
+            print("Final LIEU Value:", final_value)
+
+        else:
+            print("D18 is not Month. LIEU calculation skipped.")
+
+
+
+# ---------------- ✅ ECSF CALCULATION ----------------
+
+        print("\n--- ECSF CALCULATION ---")
+
+        ecsf_value = 0
+
+        # =====================================================
+        # FIND ECSF IN EXCELPAYSLIP COLUMN E
+        # =====================================================
+
+        for row in range(1, ws_pay.max_row + 1):
+
+            col_e = ws_pay.cell(row=row, column=5).value   # Column E
+            col_f = ws_pay.cell(row=row, column=7).value   # Column F
+
+            if col_e:
+
+                text = str(col_e).upper()
+
+                if "ECSF" in text:
+
+                    try:
+                        ecsf_value = float(str(col_f).replace(",", "").strip())
+                    except:
+                        ecsf_value = 0
+
+                    print("✅ ECSF Found:", ecsf_value)
+                    break
+
+        # =====================================================
+        # WRITE ECSF TO D27
+        # =====================================================
+
+        ws_calc["D27"] = ecsf_value
+
+        # =====================================================
+        # GET MONTH COUNT FROM I4
+        # FEB = 1, MAR = 2, APR = 3 ...
+        # =====================================================
+
+        month_count = 0
+
+        date_value = ws_calc["I4"].value
+
+        if isinstance(date_value, datetime):
+
+            current_month = date_value.month
+
+            # Feb = 1, Mar = 2, Apr = 3 ... Oct = 9
+            month_count = max(current_month - 2, 0)
+
+        print("✅ Month Count:", month_count)
+
+        # =====================================================
+        # FINAL CALCULATION
+        # (ECSF × MONTH COUNT) NEGATIVE
+        # =====================================================
+
+        final_value = round(
+            ecsf_value * month_count * -1,
+            2
+        )
+
+        # =====================================================                         
+        # WRITE RESULT
+        # =====================================================
+
+        ws_calc["C27"] = final_value
+
+        print("ECSF Value Written To D27:", ecsf_value)
+        print("Final Value Written To C27:", final_value)
+
+
+        # ---------------- ESSF CALCULATION ----------------
+
+        print("\n--- ESSF CALCULATION ---")
+
+        essf_value = 0
+
+        # =====================================================
+        # FIND ESSF IN EXCELPAYSLIP COLUMN E
+        # =====================================================
+
+        for row in range(1, ws_pay.max_row + 1):
+
+            col_e = ws_pay.cell(row=row, column=5).value   # Column E
+            col_f = ws_pay.cell(row=row, column=7).value   # Column F
+
+            if col_e:
+
+                text = str(col_e).upper()
+
+                if "ESSF" in text:
+
+                    try:
+                        essf_value = float(str(col_f).replace(",", "").strip())
+                    except:
+                        essf_value = 0
+
+                    print("✅ ESSF Found:", essf_value)
+                    break
+
+        # =====================================================
+        # WRITE ESSF TO D28
+        # =====================================================
+
+        ws_calc["D28"] = essf_value
+
+        # =====================================================
+        # GET MONTH COUNT FROM I4
+        # FEB TO PREVIOUS MONTH
+        # =====================================================
+
+        month_count = 0
+
+        date_value = ws_calc["I4"].value
+
+        if isinstance(date_value, datetime):
+
+            current_month = date_value.month
+
+            # Feb→Sep when current month is Oct = 8
+            month_count = max(current_month - 2, 0)
+
+        print("✅ Month Count:", month_count)
+
+        # =====================================================
+        # FINAL CALCULATION
+        # (ESSF × MONTH COUNT) NEGATIVE
+        # =====================================================
+
+        final_value = round(
+            essf_value * month_count * -1,
+            2
+        )
+
+        # =====================================================
+        # WRITE RESULT
+        # =====================================================
+
+        ws_calc["C28"] = final_value
+
+        print("✅ ESSF Value Written To D28:", essf_value)
+        print("✅ Final Value Written To C28:", final_value)
+
+
+
+# ---------------- ✅ CAR DRAW CALCULATION (C32) ----------------
+
+        print("\n--- CAR DRAW CALCULATION ---")
+
+        car_draw_amount = 0
+        nmuk_found = False
+
+        # =====================================================
+        # STEP 1 : FIND NMUK IN COLUMN A
+        # =====================================================
+
+        for row in range(1, ws_pay.max_row + 1):
+
+            col_a = ws_pay.cell(row=row, column=1).value
+
+            if col_a and "NMUK" in str(col_a).upper():
+                nmuk_found = True
+                print("✅ NMUK Found")
+                break
+
+        # =====================================================
+        # STEP 2 : FIND CAR DRAW IN COLUMN E
+        # PICK AMOUNT FROM COLUMN G
+        # =====================================================
+
+        if nmuk_found:
+
+            for row in range(1, ws_pay.max_row + 1):
+
+                col_e = ws_pay.cell(row=row, column=5).value  # Column E
+
+                if col_e and "CAR DRAW" in str(col_e).upper():
+
+                    try:
+                        car_draw_amount = float(
+                            str(ws_pay.cell(row=row, column=7).value)  # ✅ Column G
+                            .replace(",", "")
+                            .strip()
+                        )
+                    except:
+                        car_draw_amount = 0
+
+                    print("✅ CAR DRAW Amount Found:", car_draw_amount)
+                    break
+
+        # =====================================================
+        # STEP 3 : CHECK LEAVING DATE
+        # =====================================================
+
+        final_car_draw = car_draw_amount
+
+        leave_date = ws_calc["I4"].value
+
+        if isinstance(leave_date, datetime):
+
+            leave_day = leave_date.day
+
+            # ✅ Employee leaving between 6th and 24th
+            if 6 <= leave_day <= 24:
+                final_car_draw = 0
+
+            # ✅ Otherwise keep CAR DRAW amount
+            else:
+                final_car_draw = car_draw_amount
+
+            print("Leaving Day =", leave_day)
+
+        # =====================================================
+        # STEP 4 : WRITE RESULT TO C32
+        # =====================================================
+
+        ws_calc["C32"] = final_car_draw
+
+        print("CAR DRAW Amount =", car_draw_amount)
+        print("Final CAR DRAW =", final_car_draw)
+        print("✅ Value Written To C32:", final_car_draw)
+
+
+
+        # ---------------- ✅ FIT CENT CALCULATION ----------------
+
+        print("\n--- FIT CENT CALCULATION ---")
+
+        fit_cent_amount = 0
+        entity_found = False
+
+        # =====================================================
+        # STEP 1 : CHECK NMUK OR NTCE IN COLUMN A
+        # =====================================================
+
+        for row in range(1, ws_pay.max_row + 1):
+
+            col_a = ws_pay.cell(row=row, column=1).value
+
+            if col_a:
+
+                text = str(col_a).upper()
+
+                if "NMUK" in text or "NTCE" in text:
+                    entity_found = True
+                    print("✅ NMUK / NTCE Found")
+                    break
+
+        # =====================================================
+        # STEP 2 : FIND FIT CENT IN COLUMN E
+        # =====================================================
+
+        if entity_found:
+
+            for row in range(1, ws_pay.max_row + 1):
+
+                col_e = ws_pay.cell(row=row, column=5).value  # Column E
+
+                if col_e and "FIT CENT" in str(col_e).upper():
+
+                    try:
+                        fit_cent_amount = float(
+                            str(ws_pay.cell(row=row, column=7).value)  # Column G
+                            .replace(",", "")
+                            .strip()
+                        )
+                    except:
+                        fit_cent_amount = 0
+
+                    print("✅ FIT CENT Amount Found:", fit_cent_amount)
+                    break
+
+        # =====================================================
+        # STEP 3 : WRITE TO C36 & D36
+        # =====================================================
+
+        ws_calc["C29"] = fit_cent_amount
+        ws_calc["D29"] = fit_cent_amount
+
+        print("✅ Value Written To C36:", fit_cent_amount)
+        print("✅ Value Written To D36:", fit_cent_amount)
+
+
+        # ---------------- ✅ NSSC GYM CALCULATION ----------------
+
+        print("\n--- NSSC GYM CALCULATION ---")
+
+        nssc_gym_amount = 0
+        nmuk_found = False
+
+        # =====================================================
+        # STEP 1 : CHECK NMUK IN COLUMN A
+        # =====================================================
+
+        for row in range(1, ws_pay.max_row + 1):
+
+            col_a = ws_pay.cell(row=row, column=1).value
+
+            if col_a and "NMUK" in str(col_a).upper():
+                nmuk_found = True
+                print("✅ NMUK Found")
+                break
+
+        # =====================================================
+        # STEP 2 : FIND NSSC GYM IN COLUMN E
+        # =====================================================
+
+        if nmuk_found:
+
+            for row in range(1, ws_pay.max_row + 1):
+
+                col_e = ws_pay.cell(row=row, column=5).value  # Column E
+
+                if col_e and "NSSC GYM" in str(col_e).upper():
+
+                    try:
+                        nssc_gym_amount = float(
+                            str(ws_pay.cell(row=row, column=7).value)  # Column G
+                            .replace(",", "")
+                            .strip()
+                        )
+                    except:
+                        nssc_gym_amount = 0
+
+                    print("✅ NSSC GYM Amount Found:", nssc_gym_amount)
+                    break
+
+        # =====================================================
+        # STEP 3 : WRITE TO C37 & D37
+        # =====================================================
+
+        ws_calc["C30"] = nssc_gym_amount
+        ws_calc["D30"] = nssc_gym_amount
+
+        print("✅ Value Written To C37:", nssc_gym_amount)
+        print("✅ Value Written To D37:", nssc_gym_amount)
+
+
+
+        # ---------------- ✅ HOL DRAW CALCULATION ----------------
+
+        print("\n--- HOL DRAW CALCULATION ---")
+
+        hol_draw_amount = 0
+        nmuk_found = False
+
+        # =====================================================
+        # STEP 1 : FIND NMUK IN COLUMN A
+        # =====================================================
+
+        for row in range(1, ws_pay.max_row + 1):
+
+            col_a = ws_pay.cell(row=row, column=1).value
+
+            if col_a and "NMUK" in str(col_a).upper():
+                nmuk_found = True
+                print("✅ NMUK Found")
+                break
+
+        # =====================================================
+        # STEP 2 : FIND HOL DRAW IN COLUMN E
+        # PICK AMOUNT FROM COLUMN G
+        # =====================================================
+
+        if nmuk_found:
+
+            for row in range(1, ws_pay.max_row + 1):
+
+                col_e = ws_pay.cell(row=row, column=5).value
+
+                if col_e and "HOL DRAW" in str(col_e).upper():
+
+                    try:
+                        hol_draw_amount = float(
+                            str(ws_pay.cell(row=row, column=7).value)
+                            .replace(",", "")
+                            .strip()
+                        )
+                    except:
+                        hol_draw_amount = 0
+
+                    print("✅ HOL DRAW Amount Found:", hol_draw_amount)
+                    break
+
+        # =====================================================
+        # STEP 3 : CHECK LEAVING DATE
+        # =====================================================
+
+        final_hol_draw = 0
+
+        leave_date = ws_calc["I4"].value
+
+        if isinstance(leave_date, datetime):
+
+            leave_day = leave_date.day
+
+            # ✅ Day 1-5 OR 25-31
+            if leave_day <= 5 or leave_day >= 25:
+                final_hol_draw = hol_draw_amount
+            else:
+                final_hol_draw = 0
+
+            print("Leaving Day =", leave_day)
+
+        # =====================================================
+        # STEP 4 : WRITE RESULT
+        # =====================================================
+
+        ws_calc["C33"] = final_hol_draw
+        ws_calc["D33"] = final_hol_draw
+
+        print("HOL DRAW Amount =", hol_draw_amount)
+        print("Final HOL DRAW =", final_hol_draw)
+
+        print("✅ Value Written To C33:", final_hol_draw)
+        print("✅ Value Written To D33:", final_hol_draw)
+
+
+
+# ---------------- ✅ SAFCDRAW CALCULATION (C18) ----------------
+
+        print("\n--- SAFCDRAW CALCULATION ---")
+
+        safcdraw_amount = 0
+        nmuk_found = False
+
+        # =====================================================
+        # STEP 1 : FIND NMUK IN COLUMN A
+        # =====================================================
+
+        for row in range(1, ws_pay.max_row + 1):
+
+            col_a = ws_pay.cell(row=row, column=1).value
+
+            if col_a and "NMUK" in str(col_a).upper():
+                nmuk_found = True
+                print("✅ NMUK Found")
+                break
+
+        # =====================================================
+        # STEP 2 : FIND SAFCDRAW IN COLUMN E
+        # PICK AMOUNT FROM COLUMN G
+        # =====================================================
+
+        if nmuk_found:
+
+            for row in range(1, ws_pay.max_row + 1):
+
+                col_e = ws_pay.cell(row=row, column=5).value
+
+                if col_e and "SAFCDRAW" in str(col_e).upper():
+
+                    try:
+                        safcdraw_amount = float(
+                            str(ws_pay.cell(row=row, column=7).value)
+                            .replace(",", "")
+                            .strip()
+                        )
+                    except:
+                        safcdraw_amount = 0
+
+                    print("✅ SAFCDRAW Amount Found:", safcdraw_amount)
+                    break
+
+        # =====================================================
+        # STEP 3 : CHECK LEAVING DATE
+        # =====================================================
+
+        final_safcdraw = safcdraw_amount
+
+        leave_date = ws_calc["I4"].value
+
+        if isinstance(leave_date, datetime):
+
+            leave_day = leave_date.day
+
+            # ✅ 7th to 24th inclusive = No Deduction
+            if 7 <= leave_day <= 24:
+                final_safcdraw = 0
+            else:
+                final_safcdraw = safcdraw_amount
+
+            print("Leaving Day =", leave_day)
+
+        # =====================================================
+        # STEP 4 : WRITE RESULT TO C18
+        # =====================================================
+
+        ws_calc["C18"] = final_safcdraw
+        ws_calc["D19"] = final_safcdraw
+
+        print("SAFCDRAW Amount =", safcdraw_amount)
+        print("Final SAFCDRAW =", final_safcdraw)
+        print("✅ Value Written To C18:", final_safcdraw)
+        print("✅ Value Written To D18:", final_safcdraw)
+
+
+
+# ---------------- ✅ NUFCDRAW CALCULATION (C19) ----------------
+
+        print("\n--- NUFCDRAW CALCULATION ---")
+
+        nufcdraw_amount = 0
+        nmuk_found = False
+
+        # =====================================================
+        # STEP 1 : FIND NMUK IN COLUMN A
+        # =====================================================
+
+        for row in range(1, ws_pay.max_row + 1):
+
+            col_a = ws_pay.cell(row=row, column=1).value
+
+            if col_a and "NMUK" in str(col_a).upper():
+                nmuk_found = True
+                print("✅ NMUK Found")
+                break
+
+        # =====================================================
+        # STEP 2 : FIND NUFCDRAW IN COLUMN E
+        # PICK AMOUNT FROM COLUMN G
+        # =====================================================
+
+        if nmuk_found:
+
+            for row in range(1, ws_pay.max_row + 1):
+
+                col_e = ws_pay.cell(row=row, column=5).value
+
+                if col_e and "NUFCDRAW" in str(col_e).upper():
+
+                    try:
+                        nufcdraw_amount = float(
+                            str(ws_pay.cell(row=row, column=7).value)
+                            .replace(",", "")
+                            .strip()
+                        )
+                    except:
+                        nufcdraw_amount = 0
+
+                    print("✅ NUFCDRAW Amount Found:", nufcdraw_amount)
+                    break
+
+        # =====================================================
+        # STEP 3 : CHECK LEAVING DATE
+        # =====================================================
+
+        final_nufcdraw = nufcdraw_amount
+
+        leave_date = ws_calc["I4"].value
+
+        if isinstance(leave_date, datetime):
+
+            leave_day = leave_date.day
+
+            # ✅ 7th to 24th inclusive = No Deduction
+            if 7 <= leave_day <= 24:
+                final_nufcdraw = 0
+            else:
+                final_nufcdraw = nufcdraw_amount
+
+            print("Leaving Day =", leave_day)
+
+        # =====================================================
+        # STEP 4 : WRITE RESULT TO C19
+        # =====================================================
+
+        ws_calc["C19"] = final_nufcdraw
+        ws_calc["D19"] = final_nufcdraw
+
+        print("NUFCDRAW Amount =", nufcdraw_amount)
+        print("Final NUFCDRAW =", final_nufcdraw)
+        print("✅ Value Written To C19:", final_nufcdraw)
+        print("✅ Value Written To D19:", final_nufcdraw)
+
+
+
+        # ============================================================
+        # SHIFT RATE EXTRACTION AND SHIFT ALLOWANCE CALCULATION
+        # ============================================================
+
+        shift_percentages = {
+            "DL": 0.12,
+            "DF": 0.22,
+            "DT": 0.22,
+            "MF": 0.38,
+            "RT": 0.38,
+            "WE A": 0.30,
+            "WE B": 0.10,
+            "WE": 0.23,
+            "ES": 0.13,
+            "MN": 0.19,
+            "SP": 0.19,
+            "WEC": 0.20,
+            "TS": 0.27
+        }
+
+        shift_code = None
+        shift_rate = 0
+
+        # Search Shift in ExcelPaySlip
+        for row in ws_pay.iter_rows():
+
+            col_a = str(row[0].value or "").strip().upper()
+
+            if col_a.startswith("SHIFT"):
+
+                # Example:
+                # SHIFT DL
+                # SHIFT DF
+                # SHIFT WE A
+
+                shift_text = col_a.replace("SHIFT", "").strip()
+
+                for code in shift_percentages:
+
+                    if shift_text == code:
+
+                        shift_code = code
+
+                        # Column C value
+                        shift_rate = float(row[2].value or 0)
+
+                        break
+
+                if shift_code:
+                    break
+
+        # Paste Shift Rate into D5
+        ws_calc["D5"] = shift_rate
+
+        # Calculate Shift Allowance
+        if shift_code:
+
+            hourly_rate = float(ws_calc["C3"].value or 0)
+            basic_rate = float(ws_calc["C4"].value or 0)
+
+            shift_percent = shift_percentages[shift_code]
+
+            shift_allowance = basic_rate * shift_percent * hourly_rate
+
+            ws_calc["C5"] = round(shift_allowance, 2)
+
+        else:
+
+            ws_calc["D5"] = 0
+            ws_calc["C5"] = 0
+
+
+
+
+
+        # ---------------- ✅ GOODS CALCULATION ----------------
+
+        print("\n--- GOODS CALCULATION ---")
+
+        goods_amount = 0
+        nmuk_found = False
+
+        # =====================================================
+        # STEP 1 : FIND NMUK IN COLUMN A
+        # =====================================================
+
+        for row in range(1, ws_pay.max_row + 1):
+
+            col_a = ws_pay.cell(row=row, column=1).value
+
+            if col_a and "NMUK" in str(col_a).upper():
+                nmuk_found = True
+                print("✅ NMUK Found")
+                break
+
+        # =====================================================
+        # STEP 2 : FIND GOODS IN COLUMN E
+        # PICK AMOUNT FROM COLUMN G
+        # =====================================================
+
+        if nmuk_found:
+
+            for row in range(1, ws_pay.max_row + 1):
+
+                col_e = ws_pay.cell(row=row, column=5).value
+
+                if col_e and "GOODS" in str(col_e).upper():
+
+                    try:
+                        goods_amount = float(
+                            str(ws_pay.cell(row=row, column=7).value)
+                            .replace(",", "")
+                            .strip()
+                        )
+                    except:
+                        goods_amount = 0
+
+                    print("✅ GOODS Amount Found:", goods_amount)
+                    break
+
+        # =====================================================
+        # STEP 3 : WRITE GOODS AMOUNT TO D31
+        # =====================================================
+
+        ws_calc["D31"] = goods_amount
+
+        # =====================================================
+        # STEP 4 : GET MONTH NUMBER FROM I4
+        # =====================================================
+
+        month_count = 0
+
+        date_value = ws_calc["I4"].value
+
+        if isinstance(date_value, datetime):
+
+            # Jan=1, Feb=2 ..... Oct=10 ..... Dec=12
+            month_count = date_value.month
+
+        print("✅ Month Number:", month_count)
+
+        # =====================================================
+        # STEP 5 : CALCULATE MONTHLY VALUE
+        # =====================================================
+
+        monthly_amount = goods_amount / 12 if goods_amount else 0
+
+        final_value = round(
+            monthly_amount * month_count,
+            2
+        )
+
+        # =====================================================
+        # STEP 6 : WRITE RESULT TO C31
+        # =====================================================
+
+        ws_calc["C31"] = final_value
+
+        print("✅ GOODS Amount =", goods_amount)
+        print("✅ Monthly Amount =", monthly_amount)
+        print("✅ Month Number =", month_count)
+        print("✅ Final Value Written To C31 =", final_value)
+
+
+        # ---------------- ✅ DATE COPY TO C40 ----------------
+
+        print("\n--- DATE COPY TO C40 ---")
+
+        date_value = ws_calc["I4"].value
+
+        if isinstance(date_value, datetime):
+
+            # Format: dd-mmm-yyyy
+            formatted_date = date_value.strftime("%d-%b-%Y")
+
+            ws_calc["C40"] = formatted_date
+
+            print("✅ Date Written To C40:", formatted_date)
+
+        else:
+            print("❌ Invalid Date Found In I4")
+
+
+        # ---------------- ✅ HOUSING CALCULATION ----------------
+
+        print("\n--- HOUSING CALCULATION ---")
+
+        housing_amount = 0
+
+        # =====================================================
+        # STEP 1 : FIND HOUSING IN COLUMN E
+        # PICK AMOUNT FROM COLUMN G
+        # =====================================================
+
+        for row in range(1, ws_pay.max_row + 1):
+
+            col_e = ws_pay.cell(row=row, column=5).value
+
+            if col_e and "HOUSING" in str(col_e).upper():
+
+                try:
+                    housing_amount = float(
+                        str(ws_pay.cell(row=row, column=7).value)
+                        .replace(",", "")
+                        .strip()
+                    )
+                except:
+                    housing_amount = 0
+
+                print("✅ HOUSING Amount Found:", housing_amount)
+                break
+
+        # =====================================================
+        # STEP 2 : WRITE MONTHLY VALUE TO D36
+        # =====================================================
+
+        ws_calc["D36"] = housing_amount
+
+        # =====================================================
+        # STEP 3 : GET LEAVE DATE
+        # =====================================================
+
+        leave_date = ws_calc["I4"].value
+
+        working_days_till_leave = 0
+        total_working_days_month = 0
+
+        if isinstance(leave_date, datetime):
+
+            # First day of month
+            start_date = leave_date.replace(day=1)
+
+            # -------------------------------------------------
+            # Working Days From 1st Till Leave Date
+            # -------------------------------------------------
+
+            current_date = start_date
+
+            while current_date <= leave_date:
+
+                if current_date.weekday() < 5:   # Monday-Friday
+                    working_days_till_leave += 1
+
+                current_date += timedelta(days=1)
+
+            # -------------------------------------------------
+            # Last Day Of Month (Dynamic)
+            # -------------------------------------------------
+
+            if leave_date.month == 12:
+
+                month_end = leave_date.replace(day=31)
+
+            else:
+
+                month_end = (
+                    leave_date.replace(
+                        month=leave_date.month + 1,
+                        day=1
+                    ) - timedelta(days=1)
+                )
+
+            # -------------------------------------------------
+            # Total Working Days In Complete Month
+            # -------------------------------------------------
+
+            current_date = start_date
+
+            while current_date <= month_end:
+
+                if current_date.weekday() < 5:
+                    total_working_days_month += 1
+
+                current_date += timedelta(days=1)
+
+        # =====================================================
+        # STEP 4 : FINAL CALCULATION
+        # =====================================================
+
+        if total_working_days_month > 0:
+
+            final_value = round(
+                (housing_amount / total_working_days_month)
+                * working_days_till_leave,
+                2
+            )
+
+        else:
+
+            final_value = 0
+
+        # =====================================================
+        # STEP 5 : WRITE RESULT TO C36
+        # =====================================================
+
+        ws_calc["C36"] = final_value
+
+        print("✅ Housing Amount:", housing_amount)
+        print("✅ Working Days Till Leave Date:", working_days_till_leave)
+        print("✅ Total Working Days In Month:", total_working_days_month)
+        print("✅ Final Value Written To C36:", final_value)
+
+
+
+        # ---------------- ✅ LONDON ALLOWANCE CALCULATION ----------------
+
+        print("\n--- LONDON ALLOWANCE CALCULATION ---")
+
+        london_amount = 0
+
+        # =====================================================
+        # STEP 1 : FIND LONDON ALLOWANCE IN COLUMN E
+        # PICK AMOUNT FROM COLUMN G
+        # =====================================================
+
+        for row in range(1, ws_pay.max_row + 1):
+
+            col_e = ws_pay.cell(row=row, column=5).value
+
+            if col_e and "LONDON ALLOWANCE" in str(col_e).upper():
+
+                try:
+                    london_amount = float(
+                        str(ws_pay.cell(row=row, column=7).value)
+                        .replace(",", "")
+                        .strip()
+                    )
+                except:
+                    london_amount = 0
+
+                print("✅ LONDON ALLOWANCE Amount Found:", london_amount)
+                break
+
+        # =====================================================
+        # STEP 2 : WRITE MONTHLY VALUE TO D35
+        # =====================================================
+
+        ws_calc["D35"] = london_amount
+
+        # =====================================================
+        # STEP 3 : GET LEAVE DATE
+        # =====================================================
+
+        leave_date = ws_calc["I4"].value
+
+        working_days_till_leave = 0
+        total_working_days_month = 0
+
+        if isinstance(leave_date, datetime):
+
+            # First day of month
+            start_date = leave_date.replace(day=1)
+
+            # -------------------------------------------------
+            # Working Days From 1st Till Leave Date
+            # -------------------------------------------------
+
+            current_date = start_date
+
+            while current_date <= leave_date:
+
+                if current_date.weekday() < 5:  # Monday-Friday
+                    working_days_till_leave += 1
+
+                current_date += timedelta(days=1)
+
+            # -------------------------------------------------
+            # Last Day Of Month (Dynamic)
+            # -------------------------------------------------
+
+            if leave_date.month == 12:
+
+                month_end = leave_date.replace(day=31)
+
+            else:
+
+                month_end = (
+                    leave_date.replace(
+                        month=leave_date.month + 1,
+                        day=1
+                    ) - timedelta(days=1)
+                )
+
+            # -------------------------------------------------
+            # Total Working Days In Complete Month
+            # -------------------------------------------------
+
+            current_date = start_date
+
+            while current_date <= month_end:
+
+                if current_date.weekday() < 5:
+                    total_working_days_month += 1
+
+                current_date += timedelta(days=1)
+
+        # =====================================================
+        # STEP 4 : FINAL CALCULATION
+        # =====================================================
+
+        if total_working_days_month > 0:
+
+            final_value = round(
+                (london_amount / total_working_days_month)
+                * working_days_till_leave,
+                2
+            )
+
+        else:
+
+            final_value = 0
+
+        # =====================================================
+        # STEP 5 : WRITE RESULT
+        # =====================================================
+
+        ws_calc["C35"] = final_value
+
+        print("✅ London Allowance Amount:", london_amount)
+        print("✅ Working Days Till Leave Date:", working_days_till_leave)
+        print("✅ Total Working Days In Month:", total_working_days_month)
+        print("✅ Final Value Written To C35:", final_value)
+
+
+
+        # ---------------- ✅ LUMP SUM CALCULATION ----------------
+
+        print("\n--- LUMP SUM CALCULATION ---")
+
+        lump_sum_amount = 0
+        nde_found = False
+
+        # =====================================================
+        # STEP 1 : CHECK NDE IN COLUMN A
+        # =====================================================
+
+        for row in range(1, ws_pay.max_row + 1):
+
+            col_a = ws_pay.cell(row=row, column=1).value
+
+            if col_a and "NDE" in str(col_a).upper():
+
+                nde_found = True
+                print("✅ NDE Found")
+                break
+
+        # =====================================================
+        # STEP 2 : ONLY IF NDE FOUND, FIND LUMP SUM
+        # =====================================================
+
+        if nde_found:
+
+            for row in range(1, ws_pay.max_row + 1):
+
+                col_a = ws_pay.cell(row=row, column=1).value
+
+                if col_a and "LUMP SUM" in str(col_a).upper():
+
+                    try:
+                        lump_sum_amount = float(
+                            str(ws_pay.cell(row=row, column=2).value)  # Column B
+                            .replace(",", "")
+                            .strip()
+                        )
+                    except:
+                        lump_sum_amount = 0
+
+                    print("✅ LUMP SUM Amount Found:", lump_sum_amount)
+                    break
+
+            # =====================================================
+            # STEP 3 : WRITE MONTHLY VALUE TO D34
+            # =====================================================
+
+            ws_calc["D34"] = lump_sum_amount
+
+            # =====================================================
+            # STEP 4 : GET LEAVE DATE
+            # =====================================================
+
+            leave_date = ws_calc["I4"].value
+
+            working_days_till_leave = 0
+            total_working_days_month = 0
+
+            if isinstance(leave_date, datetime):
+
+                start_date = leave_date.replace(day=1)
+
+                # -----------------------------------------
+                # Working Days Till Leave Date
+                # -----------------------------------------
+
+                current_date = start_date
+
+                while current_date <= leave_date:
+
+                    if current_date.weekday() < 5:
+                        working_days_till_leave += 1
+
+                    current_date += timedelta(days=1)
+
+                # -----------------------------------------
+                # Last Day Of Month
+                # -----------------------------------------
+
+                if leave_date.month == 12:
+
+                    month_end = leave_date.replace(day=31)
+
+                else:
+
+                    month_end = (
+                        leave_date.replace(
+                            month=leave_date.month + 1,
+                            day=1
+                        ) - timedelta(days=1)
+                    )
+
+                # -----------------------------------------
+                # Total Working Days In Month
+                # -----------------------------------------
+
+                current_date = start_date
+
+                while current_date <= month_end:
+
+                    if current_date.weekday() < 5:
+                        total_working_days_month += 1
+
+                    current_date += timedelta(days=1)
+
+            # =====================================================
+            # STEP 5 : FINAL CALCULATION
+            # =====================================================
+
+            if total_working_days_month > 0:
+
+                final_value = round(
+                    (lump_sum_amount / total_working_days_month)
+                    * working_days_till_leave,
+                    2
+                )
+
+            else:
+
+                final_value = 0
+
+            # =====================================================
+            # STEP 6 : WRITE RESULT TO C34
+            # =====================================================
+
+            ws_calc["C34"] = final_value
+
+            print("✅ Lump Sum Amount:", lump_sum_amount)
+            print("✅ Working Days Till Leave Date:", working_days_till_leave)
+            print("✅ Total Working Days In Month:", total_working_days_month)
+            print("✅ Final Value Written To C34:", final_value)
+
+        else:
+
+            print("❌ NDE Not Found - LUMP SUM Calculation Skipped")
+
+
+
+
+
+
+
+
+        # ---------------- ✅ HOLIDAYS REQUIREMENTS ----------------
+
+        print("\n--- HOLIDAYS REQUIREMENTS ---")
+
+        ws_holidays = wb["Holidays"]
+
+        # =====================================================
+        # 1. LWD MATCH IN HOLIDAYS (A:B OR D:E) → L2
+        # =====================================================
+
+        lwd_date = ws_calc["I4"].value
+        holiday_value = 0
+
+        if lwd_date:
+
+            # Search Column A → Return Column B
+            for row in range(1, ws_holidays.max_row + 1):
+
+                if ws_holidays.cell(row=row, column=1).value == lwd_date:
+                    holiday_value = ws_holidays.cell(row=row, column=2).value
+                    break
+
+            # Search Column D → Return Column E
+            if not holiday_value:
+
+                for row in range(1, ws_holidays.max_row + 1):
+
+                    if ws_holidays.cell(row=row, column=4).value == lwd_date:
+                        holiday_value = ws_holidays.cell(row=row, column=5).value
+                        break
+
+        ws_holidays["L2"] = holiday_value
+
+        print("✅ L2 =", holiday_value)
+
+        # =====================================================
+        # 2. B31 FORMULA → L3
+        # Formula = MIN(INT(B31/5),6)
+        # =====================================================
+
+        try:
+            b31_value = float(ws_holidays["B31"].value or 0)
+            l3_value = min(int(b31_value / 5), 6)
+        except:
+            l3_value = 0
+
+        ws_holidays["L3"] = l3_value
+
+        print("✅ L3 =", l3_value)
+
+        # =====================================================
+        # 3. SHIFT MF CHECK
+        # IF SHIFT + MF FOUND → (E36 - 1) → L4
+        # =====================================================
+
+        mf_found = False
+
+        for row in range(1, ws_pay.max_row + 1):
+
+            col_a = ws_pay.cell(row=row, column=1).value
+
+            if col_a:
+
+                text = str(col_a).upper()
+
+                if "SHIFT" in text and "MF" in text:
+                    mf_found = True
+                    break
+
+        if mf_found:
+
+            try:
+                l4_value = float(ws_holidays["E36"].value or 0) - 1
+            except:
+                l4_value = 0
+
+        else:
+            l4_value = 0
+
+        ws_holidays["L4"] = l4_value
+
+        print("✅ L4 =", l4_value)
+
+        # =====================================================
+        # 4. LWD BETWEEN 25 MAY AND 29 MAY → L5 = 1
+        # =====================================================
+
+        if isinstance(lwd_date, datetime):
+
+            if lwd_date.month == 5 and 25 <= lwd_date.day <= 29:
+                ws_holidays["L5"] = 1
+            else:
+                ws_holidays["L5"] = 0
+
+        print("✅ L5 =", ws_holidays["L5"].value)
+
+        # =====================================================
+        # 5. LWD BETWEEN 07 AUG AND 27 AUG → L8 = 1
+        # =====================================================
+
+        if isinstance(lwd_date, datetime):
+
+            if lwd_date.month == 8 and 7 <= lwd_date.day <= 27:
+                ws_holidays["L8"] = 1
+            else:
+                ws_holidays["L8"] = 0
+
+        print("✅ L8 =", ws_holidays["L8"].value)
+
+        # =====================================================
+        # 6. LWD BETWEEN 21 DEC AND 02 JAN 2027 → L9 = 1
+        # =====================================================
+
+        if isinstance(lwd_date, datetime):
+
+            if (
+                (lwd_date.month == 12 and lwd_date.day >= 21)
+                or
+                (lwd_date.year == 2027 and lwd_date.month == 1 and lwd_date.day <= 2)
+            ):
+                ws_holidays["L9"] = 1
+            else:
+                ws_holidays["L9"] = 0
+
+        print("✅ L9 =", ws_holidays["L9"].value)
+
+        # =====================================================
+        # 7. COPY C36 → L6
+        # =====================================================
+
+        ws_holidays["L6"] = ws_holidays["C36"].value
+
+        print("✅ L6 =", ws_holidays["L6"].value)
+
+        # =====================================================
+        # 8. COPY F36 AS NEGATIVE VALUE → L7
+        # =====================================================
+
+        try:
+            l7_value = float(ws_holidays["F36"].value or 0) * -1
+        except:
+            l7_value = 0
+
+        ws_holidays["L7"] = l7_value
+
+        print("✅ L7 =", l7_value)
+
+        # =====================================================
+        # 9. SUM L2:L9 → L10
+        # =====================================================
+
+        total_l10 = 0
+
+        for cell in ["L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9"]:
+
+            try:
+                total_l10 += float(ws_holidays[cell].value or 0)
+            except:
+                pass
+
+        ws_holidays["L10"] = round(total_l10, 2)
+
+        print("✅ L10 =", ws_holidays["L10"].value)
+
+
+
+
+
+
+        # =====================================================
+        # ✅ HOLIDAY BALANCE CALCULATION (L14)
+        # Formula = Hourly Rate × Entity Rate × Balance
+        # =====================================================
+
+        print("\n--- HOLIDAY BALANCE CALCULATION ---")
+
+        entity_rate = 0
+
+        # -----------------------------------------------------
+        # FIND ENTITY RATE
+        # -----------------------------------------------------
+        for row in range(1, ws_pay.max_row + 1):
+
+            col_a = ws_pay.cell(row=row, column=1).value
+
+            if not col_a:
+                continue
+
+            text = str(col_a).upper()
+
+            if any(entity in text for entity in ["NMUK", "NTCE", "NITCO", "NMPC"]):
+                entity_rate = 7.8
+                print("✅ Entity Found:", text)
+                print("✅ Entity Rate:", entity_rate)
+                break
+
+            elif any(entity in text for entity in ["NMGB", "NDE"]):
+                entity_rate = 7.5
+                print("✅ Entity Found:", text)
+                print("✅ Entity Rate:", entity_rate)
+                break
+
+        # -----------------------------------------------------
+        # HOURLY RATE = Calculations!C3
+        # -----------------------------------------------------
+        try:
+            hourly_rate = float(ws_calc["C3"].value)
+        except:
+            hourly_rate = 0
+
+        # -----------------------------------------------------
+        # BALANCE = Holidays!L10
+        # -----------------------------------------------------
+        try:
+            balance = float(ws_holidays["L10"].value)
+        except:
+            balance = 0
+
+        print("Hourly Rate =", hourly_rate)
+        print("Entity Rate =", entity_rate)
+        print("Balance =", balance)
+
+        # -----------------------------------------------------
+        # FINAL CALCULATION
+        # -----------------------------------------------------
+        l14_value = hourly_rate * entity_rate * balance
+
+        # Example:
+        # 14.71 × 7.8 × 33 = 3786.354
+
+        ws_holidays["L14"] = round(l14_value, 3)
+
+        print("✅ L14 =", round(l14_value, 3))
+
+
+
+
+        # =====================================================
+        # ✅ SHIFT PERCENTAGE CALCULATION → L15
+        # =====================================================
+
+        print("\n--- SHIFT PERCENTAGE CALCULATION ---")
+
+        shift_percentage = 0
+
+        for row in range(1, ws_pay.max_row + 1):
+
+            col_a = ws_pay.cell(row=row, column=1).value
+
+            if not col_a:
+                continue
+
+            text = str(col_a).upper().strip()
+
+            if "SHIFT" not in text:
+                continue
+
+            # SHIFT WE A
+            if "WE A" in text:
+                shift_percentage = 0.30
+
+            # SHIFT WE B
+            elif "WE B" in text:
+                shift_percentage = 0.10
+
+            # SHIFT WEC
+            elif "WEC" in text:
+                shift_percentage = 0.20
+
+            # SHIFT DL
+            elif "DL" in text:
+                shift_percentage = 0.12
+
+            # SHIFT DF / DT
+            elif "DF" in text or "DT" in text:
+                shift_percentage = 0.22
+
+            # SHIFT MF / RT
+            elif "MF" in text or "RT" in text:
+                shift_percentage = 0.38
+
+            # SHIFT ES
+            elif "ES" in text:
+                shift_percentage = 0.1333
+
+            # SHIFT MN / SP
+            elif "MN" in text or "SP" in text:
+                shift_percentage = 0.185
+
+            # SHIFT TS
+            elif "TS" in text:
+                shift_percentage = 0.27
+
+            # SHIFT WE
+            elif text.strip() == "SHIFT WE":
+                shift_percentage = 0.225
+
+            print(f"✅ Shift Found: {text}")
+            print(f"✅ Shift Percentage: {shift_percentage * 100}%")
+            break
+
+        # =====================================================
+        # L15 = L14 × SHIFT %
+        # =====================================================
+
+        try:
+            l14_value = float(ws_holidays["L14"].value or 0)
+        except:
+            l14_value = 0
+
+        l15_value = round(l14_value * shift_percentage, 2)
+
+        ws_holidays["L15"] = l15_value
+
+        print("L14 =", l14_value)
+        print("Shift % =", shift_percentage * 100)
+        print("✅ L15 =", l15_value)
+
+
+        # =====================================================
+        # ✅ C15 CALCULATION
+        # If SHIFT Exists → L14 + L15
+        # Else → L14 Only
+        # =====================================================
+
+        print("\n--- C15 CALCULATION ---")
+
+        shift_found = False
+
+        # Check SHIFT in ExcelPaySlip Column A
+        for row in range(1, ws_pay.max_row + 1):
+
+            col_a = ws_pay.cell(row=row, column=1).value
+
+            if col_a and "SHIFT" in str(col_a).upper():
+
+                shift_found = True
+                print("✅ SHIFT Found:", col_a)
+                break
+
+        try:
+            l14_value = float(ws_holidays["L14"].value or 0)
+        except:
+            l14_value = 0
+
+        try:
+            l15_value = float(ws_holidays["L15"].value or 0)
+        except:
+            l15_value = 0
+
+        if shift_found:
+            c15_value = round(l14_value + l15_value, 2)
+        else:
+            c15_value = round(l14_value, 2)
+
+        ws_calc["C15"] = c15_value
+
+        print("L14 =", l14_value)
+        print("L15 =", l15_value)
+        print("✅ Final C15 =", c15_value)
+
+
+
+
+
+
+        # =====================================================
+        # ✅ HOLIDAY OVERTIME CALCULATION
+        # =====================================================
+
+        print("\n--- HOLIDAY OVERTIME CALCULATION ---")
+
+        # -----------------------------------------------------
+        # ENTITY RATE
+        # -----------------------------------------------------
+
+        entity_rate = 0
+
+        for row in range(1, ws_pay.max_row + 1):
+
+            col_a = ws_pay.cell(row=row, column=1).value
+
+            if not col_a:
+                continue
+
+            text = str(col_a).upper()
+
+            if any(x in text for x in ["NMUK", "NTCE", "NITCO", "NMPC"]):
+                entity_rate = 7.8
+                break
+
+            elif any(x in text for x in ["NMGB", "NDE"]):
+                entity_rate = 7.5
+                break
+
+        print("Entity Rate =", entity_rate)
+
+        # -----------------------------------------------------
+        # OVERTIME VALUE
+        # T&A COLUMN D = UK - OVERTIME X1.5
+        # TAKE COLUMN E TOTAL
+        # -----------------------------------------------------
+
+        overtime_value = 0
+
+        for row in range(3, ws_ta.max_row + 1):
+
+            col_d = ws_ta.cell(row=row, column=4).value
+            col_e = ws_ta.cell(row=row, column=5).value
+
+            if col_d:
+
+                if str(col_d).strip().upper() == "UK - OVERTIME X1.5":
+
+                    try:
+                        overtime_value += float(str(col_e).replace(",", "").strip())
+                    except:
+                        pass
+
+        print("Overtime Value =", overtime_value)
+
+        # -----------------------------------------------------
+        # HOLIDAY FT DAYS
+        # T&A COLUMN J = UK-NMUK HOLIDAY FT
+        # TAKE COLUMN K TOTAL
+        # -----------------------------------------------------
+
+        holiday_ft_days = 0
+
+        for row in range(3, ws_ta.max_row + 1):
+
+            col_j = ws_ta.cell(row=row, column=10).value
+            col_k = ws_ta.cell(row=row, column=11).value
+
+            if col_j:
+
+                if str(col_j).strip().upper() == "UK-NMUK HOLIDAY FT":
+
+                    try:
+                        holiday_ft_days += float(str(col_k).replace(",", "").strip())
+                    except:
+                        pass
+
+        print("Holiday FT Days =", holiday_ft_days)
+
+        # -----------------------------------------------------
+        # EXISTING HOLIDAY EXTRA
+        # EXCELPAYSLIP COLUMN E
+        # VALUE FROM COLUMN G
+        # -----------------------------------------------------
+
+        holiday_extra = 0
+
+        for row in range(1, ws_pay.max_row + 1):
+
+            col_e = ws_pay.cell(row=row, column=5).value
+
+            if col_e and "HOLIDAY EXTRA" in str(col_e).upper():
+
+                try:
+                    holiday_extra = float(
+                        str(ws_pay.cell(row=row, column=7).value)
+                        .replace(",", "")
+                        .strip()
+                    )
+                except:
+                    holiday_extra = 0
+
+                break
+
+        print("Holiday Extra =", holiday_extra)
+
+        # -----------------------------------------------------
+        # FINAL CALCULATION
+        # -----------------------------------------------------
+
+        final_value = round(
+            ((overtime_value / 2028) * entity_rate * holiday_ft_days)
+            + holiday_extra,
+            2
+        )
+
+        print("Final Value =", final_value)
+
+        # Example Output Cell
+        ws_calc["C24"] = final_value
+
+
+
+
+        # ---------------- SAVE ----------------
+
+        wb.save(file_path)
+        wb.close()
+
+        print("\nFile saved successfully")
+
+    else:
+        print("No file selected")
+
+else:
+    print("User cancelled")
