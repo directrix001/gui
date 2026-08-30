@@ -1,0 +1,16 @@
+# Render Blueprint — deploys the whole platform as ONE web service.
+# In Render: New + → Blueprint → select your GitHub repo → it reads this file.
+services:
+  - type: web
+    name: aluminum-price-intelligence
+    runtime: python
+    plan: free                       # change to "starter" (~$7/mo) for always-on
+    buildCommand: |
+      pip install -r backend/requirements.txt
+      cd frontend && npm install && npm run build
+    startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      # Optional — add these in the Render dashboard to enable Azure chat mode:
+      # AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_KEY, AZURE_OPENAI_DEPLOYMENT

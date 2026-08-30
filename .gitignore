@@ -1,0 +1,25 @@
+# --- secrets: never commit these ---
+.env
+*.env
+!.env.example
+
+# --- dependencies & builds ---
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# --- python ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# --- generated data / db (recreated on startup) ---
+backend/app/data/market.db
+
+# --- OS / editor noise ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+nohup.out
