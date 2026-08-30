@@ -70,42 +70,54 @@ Where:
 ## 3. Repository Structure
 
 ```
-files/
+Codebase_V2/
 │
 ├── main.py                             # FastAPI app entry point — run this
 ├── aluminium_data.xlsx                 # Master data file (parts + market data)
+├── best_price_model.pkl                # Trained ML model artifact (pickle)
+├── input.xlsx                          # Sample batch-forecast input file
+├── forecast_2026-08-23 (1).xlsx        # Sample batch-forecast output file
 ├── requirements.txt                    # Python dependencies
+├── test.py                             # Test / experimentation script
 │
-├── app/
-│   ├── api/
-│   │   └── v1/
-│   │       ├── router.py               # Registers all endpoint routers
-│   │       └── endpoints/
-│   │           ├── forecast_excel.py   # Single-part forecast endpoint
-│   │           └── forecast_batch.py   # Batch forecast endpoint (file upload)
-│   │
-│   ├── core/
-│   │   ├── config.py                   # App settings and constants (DF_c, horizon)
-│   │   └── logging_config.py           # Structured logging setup
-│   │
-│   ├── data/
-│   │   ├── base.py                     # Abstract interfaces for data sources
-│   │   ├── excel_store.py              # Reads aluminium_data.xlsx (active source)
-│   │   └── hardcoded_store.py          # Legacy hardcoded data (not in active endpoints)
-│   │
-│   ├── models/
-│   │   ├── request.py                  # Pydantic models for API request bodies
-│   │   └── response.py                 # Pydantic models for API responses
-│   │
-│   └── services/
-│       ├── forecast_engine.py          # Core forecasting logic (formula lives here)
-│       └── batch_forecast.py           # Batch orchestration + Excel output builder
-│
-└── tests/
-    └── test_forecast_engine.py         # Unit tests
+└── app/
+    ├── __init__.py
+    ├── api/
+    │   ├── __init__.py
+    │   └── v1/
+    │       ├── __init__.py
+    │       ├── router.py               # Registers all endpoint routers
+    │       └── endpoints/
+    │           ├── __init__.py
+    │           ├── forecast.py         # Base forecast endpoint
+    │           ├── forecast_excel.py   # Single-part forecast endpoint
+    │           ├── forecast_batch.py   # Batch forecast endpoint (file upload)
+    │           └── forecast_ml.py      # ML-based forecast endpoint
+    │
+    ├── core/
+    │   ├── __init__.py
+    │   ├── config.py                   # App settings and constants (DF_c, horizon)
+    │   └── logging_config.py           # Structured logging setup
+    │
+    ├── data/
+    │   ├── __init__.py
+    │   ├── base.py                     # Abstract interfaces for data sources
+    │   ├── excel_store.py              # Reads aluminium_data.xlsx (active source)
+    │   └── hardcoded_store.py          # Legacy hardcoded data (not in active endpoints)
+    │
+    ├── models/
+    │   ├── __init__.py
+    │   ├── request.py                  # Pydantic models for API request bodies
+    │   └── response.py                 # Pydantic models for API responses
+    │
+    └── services/
+        ├── __init__.py
+        ├── forecast_engine.py          # Core forecasting logic (formula lives here)
+        ├── batch_forecast.py           # Batch orchestration + Excel output builder
+        └── ml_forecast_engine.py       # ML forecasting engine (uses best_price_model.pkl)
 ```
 
-> Every folder inside `app/` must contain an empty `__init__.py` file or Python will not recognise it as a package and you will get a `ModuleNotFoundError`.
+> Every folder inside `app/` contains an empty `__init__.py` file — Python needs it to recognise the folder as a package, otherwise you get a `ModuleNotFoundError`.
 
 ---
 
