@@ -1,89 +1,186 @@
-SMARTSHEET TRAINING ASSESSMENT
-Basic to Intermediate
-Name: ______________________________	Date: __________________
-Employee ID: ______________________	Score: _________________
+Please read through below - let me know any deviation we have with Gurgaon team.
 
-Assessment Instructions
-• All 10 Multiple Choice Questions (MCQs) are mandatory.
-• Scenario-Based Questions- Attend any 2 questions out of 4
-• Select only one answer for each MCQ.
-• For scenario questions, briefly mention the Smartsheet feature(s) you would use and how you would apply them.
+Action - 
+1.	Get the baseline data for Material Price
+2.	AOP data for 2025, 2026
+3.	Show deviation in percentage and which factor PPI or Aloy Price or Gas impacted high in the deviation 
 
-SECTION A – MULTIPLE CHOICE QUESTIONS
-1. What is the primary purpose of a Smartsheet Form?
-A. To create dashboards
-B. To collect information and add it as new rows to a sheet
-C. To create cross-sheet formulas
-D. To generate reports automatically
-2. In Smartsheet hierarchy, what is a row directly below and indented under another row called?
-A. Primary Row
-B. Parent Row
-C. Child Row
-D. Summary Row
-3. Which function can be used to count rows that meet a specific condition?
-A. SUM
-B. COUNTIF
-C. AVG
-D. INDEX
-4. What is the main purpose of Conditional Formatting in Smartsheet?
-A. To delete rows automatically
-B. To visually highlight data based on defined conditions
-C. To restrict sheet access
-D. To create formulas
-5. What is the purpose of a Cross-Sheet Reference?
-A. To copy the formatting of another sheet
-B. To use data from another sheet within a formula
-C. To share a dashboard
-D. To create a new workspace
-6. What is Sheet Summary primarily used for?
-A. Storing attachments
-B. Capturing and calculating high-level sheet information and KPIs
-C. Creating new users
-D. Changing column properties
-7. You need to display all overdue tasks from several project sheets in one place. Which feature is most appropriate?
-A. Form
-B. Dashboard
-C. Row Report
-D. Sheet Summary
-8. Which Smartsheet feature is most suitable when selected users need controlled visibility or interaction with specific data without sharing the entire underlying sheet?
-A. Dynamic View
-B. Conditional Formatting
-C. Sheet Summary
-D. Hierarchy
-9. Which Dashboard widget is most appropriate for displaying a value such as “Total Open Tasks: 25”?
-A. Shortcut Widget
-B. Report Widget
-C. Metric Widget
-D. Image Widget
-10. What is the primary purpose of an Automated Workflow in Smartsheet?
-A. To manually format rows
-B. To trigger actions such as alerts, reminders, approvals, or update requests based on defined conditions
-C. To create hierarchy
-D. To create cross-sheet references
- 
-SECTION B – SCENARIO-BASED QUESTIONS
-Answer any 2 questions out of the 4 below (Question 11 to 14.)
-11. Project Tracking Scenario 
-You manage five project sheets in Smartsheet. Management wants a single place to see only the tasks that are Delayed or At Risk across all five projects.
-Question: Which Smartsheet feature would you use, and briefly explain how you would configure it.
-________________________________________________________________________________
-________________________________________________________________________________
-________________________________________________________________________________
-12. End-to-End Business Scenario 
-Your organization maintains multiple project sheets. Senior management wants to see Total Projects, Completed Projects, At-Risk Projects, and overall progress visually. At the same time, an external stakeholder should only be able to view or update selected project information without getting access to the complete underlying sheet.
-Question: Which Smartsheet features would you use to meet these requirements? Briefly explain your solution.
-________________________________________________________________________________
-________________________________________________________________________________
-________________________________________________________________________________
-13. Cross-Sheet Reference Scenario 
-Your organization maintains a separate Budget Sheet containing the approved budget for each project. In your Project Tracking Sheet, you need to calculate project performance using the budget information from the Budget Sheet without manually copying the values.
-Question: Which Smartsheet feature would you use, and why?
-________________________________________________________________________________
-________________________________________________________________________________
-________________________________________________________________________________
-14. Automation Scenario 
-A project manager wants Smartsheet to automatically notify the task owner when a task reaches its Due Date and the task status is still Not Complete.
-Question: Which Smartsheet feature would you use, and how would you configure it?
-________________________________________________________________________________
-________________________________________________________________________________
-________________________________________________________________________________
+For monthly material-price escalation for aluminium alloy castings, I would build an Agentic Price Prediction & Escalation Model rather than using only a single PPI index.
+The key is to separate raw-material market movement from foundry/conversion cost movement.
+Recommended architecture
+1. External market agents
+•	US PPI Agent — retrieves the relevant BLS Producer Price Index series. BLS provides both industry and commodity PPI databases. 
+•	Aluminium/LME Agent — retrieves monthly aluminium benchmark prices. LME describes its aluminium price as a global reference used in physical contracts and indexation. 
+•	Aluminium Alloy Agent — use LME Aluminium Alloy where applicable; LME publishes aluminium-alloy prices separately. 
+•	FX Agent — USD/INR or relevant customer currency.
+•	Energy Agent — natural gas/electricity if casting conversion cost is material.
+•	Scrap/secondary alloy Agent — important if your casting uses significant recycled aluminium.
+•	Freight Agent — optional for imported material.
+2. Material-price intelligence agent
+For each casting part:
+Predicted Material Price(t)
+= Base Price
+× Aluminium Market Factor
+× Alloy Factor
+× PPI Factor
+× FX Factor
+× Energy Factor
+× Other Cost Factors
+But I would not simply multiply all indexes together. Instead, estimate the historical contribution of each driver.
+For example:
+Driver	Weight
+LME Aluminium	45%
+Aluminium Alloy/secondary metal	20%
+US PPI	15%
+USD/INR	10%
+Energy	5%
+Other	5%
+The weights should be learned from your historical supplier/material-price data, not manually fixed.
+3. ML prediction layer
+I would use a hybrid model:
+Baseline
+•	Elastic Net / XGBoost
+•	Lagged PPI
+•	LME aluminium
+•	alloy price
+•	FX
+•	energy
+•	1M/3M rolling averages
+•	MoM changes
+•	YoY changes
+Advanced
+•	LightGBM/XGBoost for nonlinear relationships
+•	Time-series model for trend/seasonality
+•	Quantile regression for P10/P50/P90
+This gives you something much more useful than a single forecast:
+August material price = $3.42/kg
+P10 = $3.28
+P50 = $3.42
+P90 = $3.61
+Expected MoM increase = +4.8%
+Confidence = 82%
+4. Agentic layer
+The agent should work like this:
+                ┌──────────────┐
+                │ Price Request│
+                └──────┬───────┘
+                       ↓
+              ┌─────────────────┐
+              │ Material Agent  │
+              │ Identify alloy  │
+              │ & casting part  │
+              └────────┬────────┘
+                       ↓
+       ┌───────────────┼────────────────┐
+       ↓               ↓                ↓
+   PPI Agent       LME Agent       Alloy Agent
+       ↓               ↓                ↓
+       └───────────────┼────────────────┘
+                       ↓
+                  FX Agent
+                       ↓
+                Energy Agent
+                       ↓
+             ┌─────────────────┐
+             │ Feature Engine  │
+             │ Lag/Trend/MoM   │
+             └────────┬────────┘
+                      ↓
+             ┌─────────────────┐
+             │ ML Forecasting  │
+             │ P10/P50/P90     │
+             └────────┬────────┘
+                      ↓
+             ┌─────────────────┐
+             │ Price Governance│
+             │ Rules + Limits  │
+             └────────┬────────┘
+                      ↓
+              Monthly Price
+              Recommendation
+The important part: learn the price formula
+Suppose your historical data looks like:
+Month	Casting Price	LME Al	Alloy	PPI	USD/INR
+Jan	4.10	2,200	2,250	100	83
+Feb	4.16	2,280	2,310	101	83.2
+Mar	4.23	2,350	2,390	101.4	83.5
+…	…	…	…	…	…
+The model learns:
+Δ Casting Price =
+β1 × Δ LME Aluminium
++ β2 × Δ Alloy Price
++ β3 × Δ PPI
++ β4 × Δ FX
++ β5 × Δ Energy
++ β6 × Previous Month Price
+This is particularly powerful because you can explain why the price moved.
+For example:
+September price increase: +5.2%
+• LME aluminium: +2.8% impact
+• Alloy premium: +1.4%
+• PPI: +0.6%
+• FX: +0.3%
+• Energy: +0.1%
+• Model residual: 0.0%
+That is much more executive-friendly than saying “AI predicted a 5.2% increase.”
+5. Add an Agentic “Challenge” mechanism
+This is where the solution becomes genuinely agentic.
+Have three agents independently assess the price:
+Market Agent:
+“Commodity indicators suggest +3.8%.”
+ML Agent:
+“Historical relationship suggests +4.6%.”
+Commercial Agent:
+“Supplier quote indicates +6.2%.”
+Then a Price Governance Agent investigates the difference.
+If:
+Supplier increase − ML forecast > tolerance
+then trigger:
+“Supplier price increase requires validation.”
+The agent asks:
+•	Is there a new alloy surcharge?
+•	Has scrap premium changed?
+•	Has energy cost changed?
+•	Is there a lag between LME and supplier pricing?
+•	Has the casting yield changed?
+•	Has machining/conversion cost changed?
+•	Is the supplier applying an FX adjustment?
+6. Most important: use lagged indexes
+Don’t assume the current month’s LME/PPI immediately affects the casting price.
+Your model should test:
+•	PPI(t)
+•	PPI(t-1)
+•	PPI(t-2)
+•	LME(t)
+•	LME(t-1)
+•	LME 3M average
+•	Alloy(t-1)
+•	3M rolling average
+The model can discover that, for example:
+Casting price responds primarily to 1-month-lagged LME + 2-month-lagged PPI.
+That would make your monthly price prediction significantly more realistic.
+LME itself provides monthly average settlement-price data, which is particularly useful for this type of model rather than relying on a single daily observation. 
+Recommended final output
+For each material/part:
+Part: Aluminium Alloy Casting – ABC123
+Current: $4.25/kg
+Next Month Prediction: $4.46/kg
+Expected MoM: +4.9%
+P50: $4.46
+P90: $4.63
+Confidence: 84%
+Drivers
+Driver	Contribution
+LME Aluminium	+2.3%
+Alloy premium	+1.4%
+PPI	+0.7%
+FX	+0.3%
+Energy	+0.2%
+Other	0.0%
+Total	+4.9%
+Agent recommendation: 🟢 Accept
+This can then feed directly into SAP/ERP material-price updates, supplier negotiations, sourcing decisions and monthly S&OP/CTB reviews.
+If you’re building this for your SCM environment, I would recommend XGBoost/LightGBM + SHAP + LangGraph, with the agents handling data acquisition, validation, forecasting, explanation and governance—not using an LLM itself as the numerical forecasting model.
+
+Reagrds 
+Abhay
